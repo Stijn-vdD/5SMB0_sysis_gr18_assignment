@@ -25,13 +25,13 @@ M = max(u1); % == -1 * min(u)
 % - Periodic signal to prevent leakage
 
 N = 1500;   % Experiment length
-n = 6;      % Number of periods
+n = 10;      % Number of periods
 if mod(N,n) ~= 0
     error("n is not a clean divisor of N, reference signal cannot be periodic.")
 end
 p = N/n;    % Period length
 
-r2 = repmat(M * multisine([0,0.49],1,p),1,N);
+r2 = repmat(M * multisine([0,0.49],1,p),1,n);
 
 [u2,y2] = assignment_sys_18(r2,'open loop');
 
@@ -61,9 +61,17 @@ xlabel('t');
 % Result: transient negligible, input affected for first ~20 samples
 
 %%% 2.2 Identify system FRF
-G0_etfe = etfe(frfdata);
+Ghat_spa = spa(frfdata);
 
 f2 = figure(2);clf;
-G0_bode = bodeplot(G0_etfe);
-G0_bode.PhaseWrappingEnabled = true;
+Ghat_bode = bodeplot(Ghat_spa);
+Ghat_bode.PhaseWrappingEnabled = true;
+showConfidence(Ghat_bode);
 legend;
+grid minor;
+
+% Result:
+% - Anti-resonance around 1.2 rad/s (two complex zeros)
+% - Resonance around 2.03 rad/s (two complex poles)
+% - Anti-resonance around 2.63 rad/s (two complex zeros)
+% - DC gain -50 dB
