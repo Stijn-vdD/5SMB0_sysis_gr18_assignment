@@ -75,3 +75,13 @@ grid minor;
 % - Resonance around 2.03 rad/s (two complex poles)
 % - Anti-resonance around 2.63 rad/s (two complex zeros)
 % - DC gain -50 dB
+
+
+%%% 2.3 Plot the magnitude of the estimated noise power spectrum
+figure(3);clf;
+
+error_spectrum = spectrumplot(Ghat_spa);
+showConfidence(error_spectrum);
+grid minor;
+
+% The noise spectrum is concentrated around 2 rad/s
