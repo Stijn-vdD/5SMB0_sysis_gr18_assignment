@@ -1,4 +1,6 @@
 clearvars;
+% close all;
+restoredefaultpath;
 
 q = tf('q');
 F = (0.7157 + 1.4315*q^-1 + 0.7157*q^-2)/(1 + 1.3490*q^-1 + 0.5140*q^-2);
@@ -85,3 +87,96 @@ showConfidence(error_spectrum);
 grid minor;
 
 % The noise spectrum is concentrated around 2 rad/s
+
+%% Part 3: Parametric identification and validation
+%%% 3.1 Parametric model of G0
+N_new = 3000; % New experiment length
+
+% Generate a PRBS signal
+% PRBS maximizes signal energy for a given amplitude bound
+r3 = idinput(N_new, 'prbs', [0 1], [-M M]);
+
+[u3, y3] = assignment_sys_18(r3, 'open loop');
+data_param = iddata(y3, u3, 1, 'Domain', 'Time');
+
+figure(4); clf;
+tiledlayout(2,1, 'TileSpacing', 'compact');
+nexttile;
+plot(u3);
+ylabel('u');
+grid minor;
+nexttile;
+plot(y3);
+ylabel('y');
+xlabel('Samples');
+grid minor;
+
+% 50/50 split
+ze = data_param(1:N_new/2);     % Estimation data
+zv = data_param(N_new/2+1:end); % Validation data
+ze = detrend(ze, 0);
+zv = detrend(zv, 0);
+
+%%% 3.2: Consistent parametric identification of G0
+% Used some sweeps to find the best fit, phase still wrong though at 1.2rad/s:
+% [nb nc nd nf nk]
+% - nb=5 (4 zeros) captures the two anti-resonances.
+% - nf=8 (8 poles) captures the resonance, the known Butterworth filter, 
+%   and high-frequency roll-off, increased it to improve the fit (done by the sweep).
+% - nc=5, nd=2 captures the colored noise spectrum concentrated around 2 rad/s,
+%   determined by the sweep.
+% - nk=0 accounts for the direct feedthrough observed in cross-correlation.
+
+optimal_orders = [5, 5, 2, 8, 0];
+sys_bj = bj(ze, optimal_orders);
+
+% For a consistent estimate, Reu (cross-correlation) must be within intervals
+figure(5); clf;
+resid(zv, sys_bj);
+
+% Time-domain cross validatipon
+figure(6); clf;
+compare(zv, sys_bj);
+grid minor;
+
+% Comparison with 2
+figure(7); clf;
+bode_spabj = bodeplot(Ghat_spa, 'b', sys_bj, 'r');
+bode_spabj.PhaseWrappingEnabled = true;
+showConfidence(bode_spabj);
+legend('Nonparametric (SPA)', 'Parametric (BJ)');
+grid minor;
+% Chat specified that:
+% If the BJ model passes the R_eu residual test but fails R_e, you have a consistent 
+%   estimate of G0, but the noise model (nc, nd) might need tweaking.
+
+%%% 3.3 Minimum variance estimate
+% To prove whether the model achieves minimum variance, we can look at the 
+% confidence regions of the estimated poles and zeros. 
+% Over-parameterization leads to pole-zero cancellations and inflated variance.
+present(sys_bj);
+
+optimal_orders_reduced = [5, 5, 2, 4, 0]; % Changed nf from 8 to 4 (variance larger than parameter)
+sys_bj_reduced = bj(ze, optimal_orders_reduced);
+% Maintain fit
+figure(8); clf;
+compare(zv, sys_bj, sys_bj_reduced);
+legend('Validation Data', 'BJ [5 5 2 8 0]', 'BJ Reduced [5 5 2 4 0]');
+grid minor;
+% Pole zero map with confidences
+figure(9); clf;
+hold on;
+h_pz = iopzplot(sys_bj, sys_bj_reduced);
+showConfidence(h_pz, 3);
+legend('BJ [5 5 2 8 0]', 'BJ Reduced [5 5 2 4 0]');
+grid minor;
+axis equal;
+% Bode to check, yay it also fixed the phase at 1.3rad/s
+figure(10); clf;
+bode_spabjreduced = bodeplot(Ghat_spa, 'b', sys_bj, 'r', sys_bj_reduced, 'g');
+bode_spabjreduced.PhaseWrappingEnabled = true;
+showConfidence(bode_spabjreduced);
+legend('Nonparametric (SPA)', 'Parametric (BJ)', 'Parametric (BJ reduced)');
+grid minor;
+% Check parameter variance
+present(sys_bj_reduced);
