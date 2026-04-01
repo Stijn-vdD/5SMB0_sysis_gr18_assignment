@@ -132,11 +132,11 @@ zv = detrend(zv, 0);
 %   Verify with impulse response / cross-correlation:
 
 % Verify nk choice: plot impulse response estimate to check for delay
-figure(50); clf;
-ir_est = impulseest(ze, 30);
-impulseplot(ir_est);
-title('Impulse response estimate (check if h(0) \approx 0 for nk=1)');
-grid minor;
+% figure(50); clf;
+% ir_est = impulseest(ze, 30);
+% impulseplot(ir_est);
+% title('Impulse response estimate (check if h(0) \approx 0 for nk=1)');
+% grid minor;
 % If h(0) is significantly nonzero, nk=0 is appropriate (direct feedthrough).
 % If h(0) ≈ 0, nk=1 (one-sample delay) may be more appropriate.
 
@@ -146,7 +146,7 @@ sys_bj = bj(ze, optimal_orders);
 % Also test nk=1 for comparison
 optimal_orders_nk1 = [5, 5, 2, 8, 1];
 sys_bj_nk1 = bj(ze, optimal_orders_nk1);
-figure(51); clf;
+% figure(51); clf;
 compare(zv, sys_bj, sys_bj_nk1);
 legend('Validation Data', 'BJ nk=0', 'BJ nk=1');
 grid minor;
@@ -319,4 +319,140 @@ fprintf('F ratios: '); fprintf('%.3f  ', var_F_mc ./ var_F_theo_avg); fprintf('\
 % 3. Possible model misspecification if nf=4 does not fully capture G0's
 %    denominator dynamics
 % B parameters enter linearly, so their theoretical variance is tighter.
+
+%% Part 5: MIMO identification
+%%% 5.1 Parametric identification of a 2x2 MIMO system G0
+N_mimo = 3000;
+
+% Input design: two uncorrelated PRBS signals (one per input channel).
+% Generate both channels in one idinput call for MATLAB-version compatibility.
+% Independent channels are critical for separating the contribution of each input to each
+% output. Uncorrelated inputs prevent ill-conditioning in the regressor
+% matrix (analogous to the requirement that Phi_uu is full rank at all
+% frequencies for MIMO identifiability).
+% Band = [0 1] excites all frequencies up to Nyquist, amplitude within
+% saturation bounds [-M, M].
+r5 = idinput([N_mimo 2], 'prbs', [0 1], [-M M]); % size (N_mimo, 2)
+
+[u5, y5] = assignment_sys_18(r5, 'MIMO');
+
+data_mimo = iddata(y5, u5, 1, 'Domain', 'Time');
+
+% Plot input/output signals
+figure(12); clf;
+tiledlayout(2, 2, 'TileSpacing', 'compact');
+for ch = 1:2
+    nexttile;
+    plot(u5(:, ch));
+    ylabel(sprintf('u_%d', ch));
+    grid minor;
+end
+for ch = 1:2
+    nexttile;
+    plot(y5(:, ch));
+    ylabel(sprintf('y_%d', ch));
+    grid minor;
+end
+xlabel('Samples');
+
+% 50/50 split for estimation and validation
+ze_mimo = detrend(data_mimo(1:N_mimo/2), 0);
+zv_mimo = detrend(data_mimo(N_mimo/2+1:end), 0);
+
+%%% Model structure choice: state-space via subspace identification (n4sid)
+% For MIMO systems, state-space models are more natural than polynomial
+% (BJ/OE) models because:
+% 1. A single state-space model captures all input-output channels
+%    simultaneously with shared state dynamics.
+% 2. Polynomial MIMO models require specifying separate orders for each
+%    transfer function entry (4 B polynomials + 4 F polynomials for a 2x2),
+%    which is cumbersome and prone to over-parameterization.
+% 3. Subspace methods (n4sid) provide a non-iterative, numerically robust
+%    initial estimate without local minima issues.
+
+% Determine model order using singular value analysis
+% figure(13); clf;
+n4sid(ze_mimo);
+title('Singular values for MIMO model order selection');
+% Inspect the singular value plot: look for a clear gap indicating the
+% appropriate model order. Select the order where the singular values
+% drop significantly.
+
+% From the SISO identification (Part 3), we expect:
+% - 2 complex pole pairs (resonance + anti-resonance dynamics) per channel
+%   → order ~4-8 for the plant dynamics
+% Try a range of orders and compare validation fit
+n_orders = 2:12;
+sys_mimo_candidates = cell(length(n_orders), 1);
+fit_scores = zeros(length(n_orders), 1);
+
+for idx = 1:length(n_orders)
+    sys_mimo_candidates{idx} = n4sid(ze_mimo, n_orders(idx), 'Focus', 'sim');
+end
+
+% Compare all candidates on validation data
+figure(14); clf;
+compare(zv_mimo, sys_mimo_candidates{:});
+legend(['Validation Data', compose('n=%d', n_orders)]);
+grid minor;
+title('MIMO model order comparison');
+
+% Select the best order based on validation fit (best compare %)
+% Use a parsimony criterion: pick the lowest order that achieves a fit
+% close to the best (within ~2-3% of the maximum)
+for idx = 1:length(n_orders)
+    [~, fit_tmp] = compare(zv_mimo, sys_mimo_candidates{idx});
+    fit_scores(idx) = mean(fit_tmp); % average fit across output channels
+end
+fprintf('\n--- MIMO model order selection ---\n');
+for idx = 1:length(n_orders)
+    fprintf('  n=%2d: avg fit = %.1f%%\n', n_orders(idx), fit_scores(idx));
+end
+
+[best_fit, best_idx] = max(fit_scores);
+% Pick lowest order within 3% of the best fit (parsimony)
+threshold = best_fit - 3;
+chosen_idx = find(fit_scores >= threshold, 1, 'first');
+n_chosen = n_orders(chosen_idx);
+fprintf('Best fit: n=%d (%.1f%%), chosen (parsimony): n=%d (%.1f%%)\n', ...
+    n_orders(best_idx), best_fit, n_chosen, fit_scores(chosen_idx));
+
+sys_mimo_n4sid = sys_mimo_candidates{chosen_idx};
+
+%%% Refine with ssest (prediction error minimization)
+% n4sid provides a consistent but not necessarily efficient estimate.
+% ssest refines it by minimizing the prediction error (PEM), using the
+% n4sid result as initial condition to avoid local minima.
+sys_mimo = ssest(ze_mimo, sys_mimo_n4sid);
+
+% Validation: compare on validation data
+figure(15); clf;
+compare(zv_mimo, sys_mimo_n4sid, sys_mimo);
+legend('Validation Data', sprintf('n4sid (n=%d)', n_chosen), ...
+    sprintf('ssest (n=%d)', n_chosen));
+grid minor;
+title('MIMO: n4sid vs ssest refinement');
+
+% Residual analysis for consistency check
+figure(16); clf;
+resid(zv_mimo, sys_mimo);
+title('MIMO residual analysis');
+
+% Bode plot of the identified 2x2 transfer matrix
+figure(17); clf;
+bode_mimo = bodeplot(sys_mimo);
+showConfidence(bode_mimo);
+grid minor;
+title('Identified MIMO system G_0(q)');
+
+% Pole-zero map
+figure(18); clf;
+pzmap(sys_mimo);
+grid minor;
+title('MIMO pole-zero map');
+
+fprintf('\n--- MIMO identification summary ---\n');
+fprintf('Model order: n = %d states\n', n_chosen);
+fprintf('Method: n4sid (subspace) + ssest (PEM refinement)\n');
+present(sys_mimo);
 
