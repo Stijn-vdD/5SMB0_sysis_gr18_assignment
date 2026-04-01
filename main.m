@@ -234,8 +234,8 @@ for i = 1:n_mc
     [u_mc, y_mc] = assignment_sys_18(r_mc, 'open loop');
     data_mc = iddata(y_mc, u_mc, 1, 'Domain', 'Time');
     ze_mc = detrend(data_mc(1:N_new/2), 0);
-    % Warm-start from Part 3 model to reduce local-minima effects
-    sys_mc = bj(ze_mc, orders, sys_bj_reduced);
+    % Use the toolbox-compatible BJ syntax for each Monte Carlo run.
+    sys_mc = bj(ze_mc, orders);
     params_all(i,:) = getpvec(sys_mc)';
     cov_diags(i,:) = diag(getcov(sys_mc))';
 end
