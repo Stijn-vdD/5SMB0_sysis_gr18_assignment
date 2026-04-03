@@ -142,17 +142,50 @@ zv = detrend(zv, 0);
 
 % Sweep BJ orders under assignment constraints:
 % nb >= 4, nf > 2, nd >= 2, nc >= 2, nk <= 1.
-% Selection criterion: highest validation fit; AIC as tie-breaker.
+% Selection strategy:
+% 1) Keep models with plant fit within 2% of the best fit.
+% 2) Within that set, select the model with best residual diagnostics
+%    (fewest R_eu and R_ee bound violations), then AIC.
 % nb_range = 4:6;
 % nc_range = 2:5;
 % nd_range = 2:10;
 % nf_range = 3:10;
 % nk_range = 0:1;
-nb_range = [2 4 6];
+% nb_range = 3:7;
+% % nf_range = 4:10;
+% nf_range = 5:9; %[2 4 6 8]
+% nc_range = 1:2; %:2
+% nd_range = 2:3; %:3
+% nk_range = 0;
+
+% nb_range = 5;
+% % nf_range = 4:10;
+% nf_range = 5:6; %[2 4 6 8]
+% nc_range = 1:5; %:2
+% nd_range = 1:5; %:3
+% nk_range = 0;
+
+% nb_range = 5;
+% % nf_range = 4:10;
+% nf_range = 4:5; %[2 4 6 8]
+% nc_range = 1:2; %:2
+% nd_range = 2:3; %:3
+% nk_range = 0;
+
+% nb_range = 5;
+% % nf_range = 4:10;
+% % nf_range = 4:5; %[2 4 6 8]
+% nf_range = 4:5; %[2 4 6 8]
+% nc_range = 2:10; %:2
+% nd_range = 2:10; %:3
+% nk_range = 0;
+
+nb_range = 5;
 % nf_range = 4:10;
-nf_range = [2 4 6 8];
-nc_range = 1:2;
-nd_range = 2; %:3
+% nf_range = 4:5; %[2 4 6 8]
+nf_range = 4:5; %[2 4 6 8]
+nc_range = 2; %:2
+nd_range = 5; %:3
 nk_range = 0;
 
 n_comb = numel(nb_range) * numel(nc_range) * numel(nd_range) * ...
@@ -160,6 +193,14 @@ n_comb = numel(nb_range) * numel(nc_range) * numel(nd_range) * ...
 orders_sweep = zeros(n_comb, 5);
 fit_sweep = -inf(n_comb, 1);
 aic_sweep = inf(n_comb, 1);
+n_eu_out_sweep = inf(n_comb, 1);
+n_ee_out_sweep = inf(n_comb, 1);
+frac_ee_out_sweep = inf(n_comb, 1);
+noise_order_sweep = inf(n_comb, 1); % nc + nd
+
+N_sweep = size(zv.OutputData, 1);
+max_lag_sweep = min(50, N_sweep - 1);
+conf99_sweep = 2.576 / sqrt(N_sweep);
 
 k = 0;
 for nb = nb_range
@@ -175,8 +216,19 @@ for nb = nb_range
                         [~, fit_tmp] = compare(zv, sys_try);
                         fit_sweep(k) = mean(fit_tmp(:));
                         aic_sweep(k) = aic(sys_try);
+
+                        % Independent error-model quality metrics from residuals
+                        e_try_id = pe(zv, sys_try);
+                        e_try = e_try_id.OutputData(:,1);
+                        u_try = zv.InputData(:,1);
+                        [Reu_try, ~] = xcorr(e_try, u_try, max_lag_sweep, 'coeff');
+                        [Ree_try, lags_ee_try] = xcorr(e_try, e_try, max_lag_sweep, 'coeff');
+                        n_eu_out_sweep(k) = sum(abs(Reu_try) > conf99_sweep);
+                        n_ee_out_sweep(k) = sum(abs(Ree_try(lags_ee_try ~= 0)) > conf99_sweep);
+                        frac_ee_out_sweep(k) = n_ee_out_sweep(k) / (numel(Ree_try) - 1);
+                        noise_order_sweep(k) = orders_try(2) + orders_try(3);
                     catch
-                        % Keep defaults (-inf, inf) for failed fits.
+                        % Keep defaults for failed fits.
                     end
                 end
             end
@@ -184,19 +236,36 @@ for nb = nb_range
     end
 end
 
-valid_idx = isfinite(aic_sweep) & isfinite(fit_sweep);
+valid_idx = isfinite(aic_sweep) & isfinite(fit_sweep) & ...
+    isfinite(n_eu_out_sweep) & isfinite(n_ee_out_sweep) & ...
+    isfinite(noise_order_sweep);
 if ~any(valid_idx)
     error('No valid BJ model found in the sweep ranges.');
 end
 
-valid_rows = find(valid_idx);
-[~, best_local_idx] = max(fit_sweep(valid_rows));
-candidate_rows = valid_rows(fit_sweep(valid_rows) == fit_sweep(valid_rows(best_local_idx)));
-if numel(candidate_rows) > 1
-    [~, best_aic_idx] = min(aic_sweep(candidate_rows));
-    best_idx = candidate_rows(best_aic_idx);
+whiteness_pass_idx = valid_idx & (n_ee_out_sweep == 0);
+
+if any(whiteness_pass_idx)
+    best_fit_pass = max(fit_sweep(whiteness_pass_idx));
+    fit_eps = 1e-9;
+    best_fit_rows = find(whiteness_pass_idx & (abs(fit_sweep - best_fit_pass) <= fit_eps));
+
+    % Requested criterion among whiteness-passing models:
+    % highest plant fit, then lowest noise-model order (nc+nd), then AIC.
+    sel_table = [noise_order_sweep(best_fit_rows), aic_sweep(best_fit_rows)];
+    [~, sel_sort_idx] = sortrows(sel_table, [1 2]);
+    best_idx = best_fit_rows(sel_sort_idx(1));
+    selection_mode = 'Whiteness-pass constrained';
 else
-    best_idx = valid_rows(best_local_idx);
+    % Fallback when no model passes whiteness: maximize fit, then minimize
+    % whiteness violations and noise-model order.
+    best_fit_valid = max(fit_sweep(valid_idx));
+    fit_eps = 1e-9;
+    best_fit_rows = find(valid_idx & (abs(fit_sweep - best_fit_valid) <= fit_eps));
+    sel_table = [n_ee_out_sweep(best_fit_rows), noise_order_sweep(best_fit_rows), aic_sweep(best_fit_rows)];
+    [~, sel_sort_idx] = sortrows(sel_table, [1 2 3]);
+    best_idx = best_fit_rows(sel_sort_idx(1));
+    selection_mode = 'No whiteness-pass fallback';
 end
 
 optimal_orders = orders_sweep(best_idx, :);
@@ -205,12 +274,21 @@ sys_bj = bj(ze, optimal_orders);
 fprintf('\n--- BJ order sweep (Section 3.2) ---\n');
 fprintf('Best orders [nb nc nd nf nk] = [%d %d %d %d %d]\n', optimal_orders);
 fprintf('Validation fit = %.2f%%, AIC = %.4g\n', fit_sweep(best_idx), aic_sweep(best_idx));
+fprintf('R_eu outside 99%% bounds = %d, R_ee outside 99%% bounds = %d\n', ...
+    n_eu_out_sweep(best_idx), n_ee_out_sweep(best_idx));
+fprintf('Noise-model order (nc+nd) = %d\n', noise_order_sweep(best_idx));
+fprintf('Whiteness-pass candidates: %d / %d\n', sum(whiteness_pass_idx), sum(valid_idx));
+fprintf('Selection mode: %s\n', selection_mode);
 
-score_table = [orders_sweep(valid_idx, :), fit_sweep(valid_idx), aic_sweep(valid_idx)];
-[~, sort_idx] = sortrows(score_table, [-6, 7]); % fit desc, AIC asc
-disp('All valid BJ candidates (sorted by fit desc, AIC asc):');
+score_table = [orders_sweep(valid_idx, :), fit_sweep(valid_idx), aic_sweep(valid_idx), ...
+    n_eu_out_sweep(valid_idx), n_ee_out_sweep(valid_idx), frac_ee_out_sweep(valid_idx), ...
+    noise_order_sweep(valid_idx), whiteness_pass_idx(valid_idx)];
+[~, sort_idx] = sortrows(score_table, [-12, -6, 11, 7]);
+disp(['All valid BJ candidates (sorted by passWhiteness desc, fit desc, ', ...
+    'noiseOrder asc, AIC asc):']);
 disp(array2table(score_table(sort_idx, :), ...
-    'VariableNames', {'nb','nc','nd','nf','nk','fitPct','AIC'}));
+    'VariableNames', {'nb','nc','nd','nf','nk','fitPct','AIC', ...
+    'nReuOut99','nReeOut99','fracReeOut99','noiseOrderNcNd','passWhiteness99'}));
 
 % Compare chosen nk with the alternate nk (0 <-> 1), holding other orders fixed.
 figure(51); clf;
@@ -233,6 +311,60 @@ title('Delay comparison for best BJ structure');
 figure(5); clf;
 resid(zv, sys_bj);
 
+% Explicit correlation diagnostics for report figure:
+% - R_eu(tau): consistency check of plant model G0
+% - R_ee(tau): whiteness test of residuals (noise model quality)
+e_id = pe(zv, sys_bj);
+e_val = e_id.OutputData;
+u_val = zv.InputData;
+N_res = size(e_val, 1);
+max_lag = min(50, N_res - 1);
+conf99 = 2.576 / sqrt(N_res);
+
+[Reu, lags_eu] = xcorr(e_val(:,1), u_val(:,1), max_lag, 'coeff');
+[Ree, lags_ee] = xcorr(e_val(:,1), e_val(:,1), max_lag, 'coeff');
+
+figure(52); clf;
+tiledlayout(2,1, 'TileSpacing', 'compact');
+nexttile;
+stem(lags_eu, Reu, 'filled');
+hold on;
+yline(conf99, 'r--', '99% bound');
+yline(-conf99, 'r--');
+yline(0, 'k-');
+grid minor;
+xlabel('Lag \tau [samples]');
+ylabel('R_{\epsilon u}(\tau)');
+title(sprintf('Residual-input cross-correlation (BJ [%d %d %d %d %d])', optimal_orders));
+
+nexttile;
+stem(lags_ee, Ree, 'filled');
+hold on;
+yline(conf99, 'r--', '99% bound');
+yline(-conf99, 'r--');
+yline(0, 'k-');
+grid minor;
+xlabel('Lag \tau [samples]');
+ylabel('R_{\epsilon\epsilon}(\tau)');
+title('Residual autocorrelation (whiteness test)');
+
+n_eu_out = sum(abs(Reu) > conf99);
+n_ee_out = sum(abs(Ree(lags_ee ~= 0)) > conf99);
+fprintf('\n--- Residual correlation diagnostics (Part 3) ---\n');
+fprintf('R_eu outside 99%% bounds: %d / %d lags\n', n_eu_out, numel(Reu));
+fprintf('R_ee outside 99%% bounds (excluding tau=0): %d / %d lags\n', ...
+    n_ee_out, numel(Ree)-1);
+if n_eu_out == 0
+    fprintf('Plant consistency test: PASS (no significant input-residual correlation).\n');
+else
+    fprintf('Plant consistency test: FAIL/WEAK (remaining input-residual correlation).\n');
+end
+if n_ee_out == 0
+    fprintf('Residual whiteness test: PASS (noise model appears adequate).\n');
+else
+    fprintf('Residual whiteness test: FAIL/WEAK (residuals not fully white).\n');
+end
+
 % Time-domain cross validatipon
 figure(6); clf;
 compare(zv, sys_bj);
@@ -249,51 +381,16 @@ grid minor;
 % consistently estimated, but the noise model (nc, nd) may need tweaking.
 
 %%% 3.3 Minimum variance estimate
-% To prove whether the model achieves minimum variance, we can look at the 
-% confidence regions of the estimated poles and zeros. 
-% Over-parameterization leads to pole-zero cancellations and inflated variance.
+% Figure 52 (R_eu and R_ee with 99% bounds) is used for the consistency
+% and whiteness assessment in Part 3.3.
 present(sys_bj);
-
-% Reduce nf relative to the swept optimum: present(sys_bj) may show that several F coefficients
-% have standard deviation larger than the parameter magnitude, indicating
-% pole-zero near-cancellations and over-parameterization.
-% The FRF suggests ~2 complex poles (resonance at 2.03 rad/s), so we
-% enforce a simpler denominator by reducing nf from the swept optimum.
-optimal_orders_reduced = optimal_orders;
-optimal_orders_reduced(4) = max(3, optimal_orders(4) - 2);
-sys_bj_reduced = bj(ze, optimal_orders_reduced);
-% Maintain fit
-figure(8); clf;
-compare(zv, sys_bj, sys_bj_reduced);
-legend('Validation Data', ...
-    sprintf('BJ best [%d %d %d %d %d]', optimal_orders), ...
-    sprintf('BJ reduced [%d %d %d %d %d]', optimal_orders_reduced));
-grid minor;
-% Pole zero map with confidences
-figure(9); clf;
-hold on;
-h_pz = iopzplot(sys_bj, sys_bj_reduced);
-showConfidence(h_pz, 3);
-legend(sprintf('BJ best [%d %d %d %d %d]', optimal_orders), ...
-    sprintf('BJ reduced [%d %d %d %d %d]', optimal_orders_reduced));
-grid minor;
-axis equal;
-% Bode to check, yay it also fixed the phase at 1.3rad/s
-figure(10); clf;
-bode_spabjreduced = bodeplot(Ghat_spa, 'b', sys_bj, 'r', sys_bj_reduced, 'g');
-bode_spabjreduced.PhaseWrappingEnabled = true;
-showConfidence(bode_spabjreduced);
-legend('Nonparametric (SPA)', 'Parametric (BJ)', 'Parametric (BJ reduced)');
-grid minor;
-% Check parameter variance
-present(sys_bj_reduced);
 
 %% Part 4: Experimental verification of variance estimates
 %%% 4.1 Monte Carlo simulations
 % Repeat Question 3 for 100 times: each run uses the same PRBS reference
 % but a new noise realization (from assignment_sys_18) and estimates a BJ model.
 n_mc = 100;
-orders = optimal_orders_reduced; % [nb nc nd nf nk] from 3.2 sweep + 3.3 reduction
+orders = optimal_orders; % [nb nc nd nf nk] selected in 3.2
 n_B = orders(1);
 n_F = orders(4);
 
@@ -345,7 +442,7 @@ grid minor;
 %%% 4.2 Theoretical variance from one experiment
 % getcov returns the covariance matrix with the same parameter ordering
 % as getpvec: [B, C, D, F]
-P_cov = getcov(sys_bj_reduced);
+P_cov = getcov(sys_bj);
 var_theo = diag(P_cov);
 var_B_theo = var_theo(idx_B);
 var_F_theo = var_theo(idx_F);
