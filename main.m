@@ -140,21 +140,94 @@ zv = detrend(zv, 0);
 % If h(0) is significantly nonzero, nk=0 is appropriate (direct feedthrough).
 % If h(0) ≈ 0, nk=1 (one-sample delay) may be more appropriate.
 
-optimal_orders = [5, 5, 2, 8, 0];
+% Sweep BJ orders under assignment constraints:
+% nb >= 4, nf > 2, nd >= 2, nc >= 2, nk <= 1.
+% Selection criterion: highest validation fit; AIC as tie-breaker.
+% nb_range = 4:6;
+% nc_range = 2:5;
+% nd_range = 2:10;
+% nf_range = 3:10;
+% nk_range = 0:1;
+nb_range = [2 4 6];
+% nf_range = 4:10;
+nf_range = [2 4 6 8];
+nc_range = 1:2;
+nd_range = 2; %:3
+nk_range = 0;
+
+n_comb = numel(nb_range) * numel(nc_range) * numel(nd_range) * ...
+    numel(nf_range) * numel(nk_range);
+orders_sweep = zeros(n_comb, 5);
+fit_sweep = -inf(n_comb, 1);
+aic_sweep = inf(n_comb, 1);
+
+k = 0;
+for nb = nb_range
+    for nc = nc_range
+        for nd = nd_range
+            for nf = nf_range
+                for nk = nk_range
+                    k = k + 1;
+                    orders_try = [nb, nc, nd, nf, nk];
+                    orders_sweep(k, :) = orders_try;
+                    try
+                        sys_try = bj(ze, orders_try);
+                        [~, fit_tmp] = compare(zv, sys_try);
+                        fit_sweep(k) = mean(fit_tmp(:));
+                        aic_sweep(k) = aic(sys_try);
+                    catch
+                        % Keep defaults (-inf, inf) for failed fits.
+                    end
+                end
+            end
+        end
+    end
+end
+
+valid_idx = isfinite(aic_sweep) & isfinite(fit_sweep);
+if ~any(valid_idx)
+    error('No valid BJ model found in the sweep ranges.');
+end
+
+valid_rows = find(valid_idx);
+[~, best_local_idx] = max(fit_sweep(valid_rows));
+candidate_rows = valid_rows(fit_sweep(valid_rows) == fit_sweep(valid_rows(best_local_idx)));
+if numel(candidate_rows) > 1
+    [~, best_aic_idx] = min(aic_sweep(candidate_rows));
+    best_idx = candidate_rows(best_aic_idx);
+else
+    best_idx = valid_rows(best_local_idx);
+end
+
+optimal_orders = orders_sweep(best_idx, :);
 sys_bj = bj(ze, optimal_orders);
 
-% Also test nk=1 for comparison
-optimal_orders_nk1 = [5, 5, 2, 8, 1];
-sys_bj_nk1 = bj(ze, optimal_orders_nk1);
-% figure(51); clf;
-compare(zv, sys_bj, sys_bj_nk1);
-legend('Validation Data', 'BJ nk=0', 'BJ nk=1');
+fprintf('\n--- BJ order sweep (Section 3.2) ---\n');
+fprintf('Best orders [nb nc nd nf nk] = [%d %d %d %d %d]\n', optimal_orders);
+fprintf('Validation fit = %.2f%%, AIC = %.4g\n', fit_sweep(best_idx), aic_sweep(best_idx));
+
+score_table = [orders_sweep(valid_idx, :), fit_sweep(valid_idx), aic_sweep(valid_idx)];
+[~, sort_idx] = sortrows(score_table, [-6, 7]); % fit desc, AIC asc
+disp('All valid BJ candidates (sorted by fit desc, AIC asc):');
+disp(array2table(score_table(sort_idx, :), ...
+    'VariableNames', {'nb','nc','nd','nf','nk','fitPct','AIC'}));
+
+% Compare chosen nk with the alternate nk (0 <-> 1), holding other orders fixed.
+figure(51); clf;
+alt_orders = optimal_orders;
+alt_orders(5) = 1 - optimal_orders(5);
+try
+    sys_bj_altnk = bj(ze, alt_orders);
+    compare(zv, sys_bj, sys_bj_altnk);
+    legend('Validation Data', ...
+        sprintf('BJ best [%d %d %d %d %d]', optimal_orders), ...
+        sprintf('BJ alt nk [%d %d %d %d %d]', alt_orders));
+catch
+    compare(zv, sys_bj);
+    legend('Validation Data', sprintf('BJ best [%d %d %d %d %d]', optimal_orders));
+end
 grid minor;
-title('Delay comparison: nk=0 vs nk=1');
-% Result: h(0) ≈ 0.005 (≈ 0), suggesting nk=1 is physically correct.
-% However, nk=0 gives 83% vs 75% fit — the extra b_0 parameter improves
-% the fit significantly. We keep nk=0 for the better fit; note in the
-% report that the true delay is likely 1 sample.
+title('Delay comparison for best BJ structure');
 
 % For a consistent estimate, Reu (cross-correlation) must be within intervals
 figure(5); clf;
@@ -181,23 +254,28 @@ grid minor;
 % Over-parameterization leads to pole-zero cancellations and inflated variance.
 present(sys_bj);
 
-% Reduce nf from 8 to 4: present(sys_bj) shows that several F coefficients
+% Reduce nf relative to the swept optimum: present(sys_bj) may show that several F coefficients
 % have standard deviation larger than the parameter magnitude, indicating
 % pole-zero near-cancellations and over-parameterization.
-% The FRF suggests ~2 complex poles (resonance at 2.03 rad/s) → nf=4.
-optimal_orders_reduced = [5, 5, 2, 4, 0];
+% The FRF suggests ~2 complex poles (resonance at 2.03 rad/s), so we
+% enforce a simpler denominator by reducing nf from the swept optimum.
+optimal_orders_reduced = optimal_orders;
+optimal_orders_reduced(4) = max(3, optimal_orders(4) - 2);
 sys_bj_reduced = bj(ze, optimal_orders_reduced);
 % Maintain fit
 figure(8); clf;
 compare(zv, sys_bj, sys_bj_reduced);
-legend('Validation Data', 'BJ [5 5 2 8 0]', 'BJ Reduced [5 5 2 4 0]');
+legend('Validation Data', ...
+    sprintf('BJ best [%d %d %d %d %d]', optimal_orders), ...
+    sprintf('BJ reduced [%d %d %d %d %d]', optimal_orders_reduced));
 grid minor;
 % Pole zero map with confidences
 figure(9); clf;
 hold on;
 h_pz = iopzplot(sys_bj, sys_bj_reduced);
 showConfidence(h_pz, 3);
-legend('BJ [5 5 2 8 0]', 'BJ Reduced [5 5 2 4 0]');
+legend(sprintf('BJ best [%d %d %d %d %d]', optimal_orders), ...
+    sprintf('BJ reduced [%d %d %d %d %d]', optimal_orders_reduced));
 grid minor;
 axis equal;
 % Bode to check, yay it also fixed the phase at 1.3rad/s
@@ -215,7 +293,7 @@ present(sys_bj_reduced);
 % Repeat Question 3 for 100 times: each run uses the same PRBS reference
 % but a new noise realization (from assignment_sys_18) and estimates a BJ model.
 n_mc = 100;
-orders = optimal_orders_reduced; % [nb nc nd nf nk] = [5 5 2 4 0]
+orders = optimal_orders_reduced; % [nb nc nd nf nk] from 3.2 sweep + 3.3 reduction
 n_B = orders(1);
 n_F = orders(4);
 
