@@ -93,8 +93,6 @@ grid minor;
 %%% 3.1 Parametric model of G0
 N_new = 3000; % New experiment length
 
-% Generate a PRBS signal
-% PRBS maximizes signal energy for a given amplitude bound
 r3 = idinput(N_new, 'prbs', [0 1], [-M M]);
 
 [u3, y3] = assignment_sys_18(r3, 'open loop');
@@ -119,70 +117,7 @@ ze = detrend(ze, 0);
 zv = detrend(zv, 0);
 
 %%% 3.2: Consistent parametric identification of G0
-% BJ model: y = (B/F)u + (C/D)e — separates plant and noise model,
-% so noise model misspecification does not bias the G0 estimate (consistency).
-% We identify from u to y, so F(q) and S(·) are NOT part of G0.
-%
-% [nb nc nd nf nk]
-% - nb=5 (4 zeros) captures the two anti-resonances seen in the FRF.
-% - nf=8 (8 poles) captures the resonance, high-frequency roll-off, and
-%   additional dynamics; started high to ensure a good fit, reduced in 3.3.
-% - nc=5, nd=2 captures the colored noise spectrum concentrated around 2 rad/s.
-% - nk=0 assumes direct feedthrough (no pure delay from u to y).
-%   Verify with impulse response / cross-correlation:
-
-% Verify nk choice: plot impulse response estimate to check for delay
-% figure(50); clf;
-% ir_est = impulseest(ze, 30);
-% impulseplot(ir_est);
-% title('Impulse response estimate (check if h(0) \approx 0 for nk=1)');
-% grid minor;
-% If h(0) is significantly nonzero, nk=0 is appropriate (direct feedthrough).
-% If h(0) ≈ 0, nk=1 (one-sample delay) may be more appropriate.
-
-% Sweep BJ orders under assignment constraints:
-% nb >= 4, nf > 2, nd >= 2, nc >= 2, nk <= 1.
-% Selection strategy:
-% 1) Keep models with plant fit within 2% of the best fit.
-% 2) Within that set, select the model with best residual diagnostics
-%    (fewest R_eu and R_ee bound violations), then AIC.
-% nb_range = 4:6;
-% nc_range = 2:5;
-% nd_range = 2:10;
-% nf_range = 3:10;
-% nk_range = 0:1;
-% nb_range = 3:7;
-% % nf_range = 4:10;
-% nf_range = 5:9; %[2 4 6 8]
-% nc_range = 1:2; %:2
-% nd_range = 2:3; %:3
-% nk_range = 0;
-
-% nb_range = 5;
-% % nf_range = 4:10;
-% nf_range = 5:6; %[2 4 6 8]
-% nc_range = 1:5; %:2
-% nd_range = 1:5; %:3
-% nk_range = 0;
-
-% nb_range = 5;
-% % nf_range = 4:10;
-% nf_range = 4:5; %[2 4 6 8]
-% nc_range = 1:2; %:2
-% nd_range = 2:3; %:3
-% nk_range = 0;
-
-% nb_range = 5;
-% % nf_range = 4:10;
-% % nf_range = 4:5; %[2 4 6 8]
-% nf_range = 4:5; %[2 4 6 8]
-% nc_range = 2:10; %:2
-% nd_range = 2:10; %:3
-% nk_range = 0;
-
 nb_range = 5;
-% nf_range = 4:10;
-% nf_range = 4:5; %[2 4 6 8]
 nf_range = 4:5; %[2 4 6 8]
 nc_range = 2; %:2
 nd_range = 5; %:3
@@ -217,7 +152,6 @@ for nb = nb_range
                         fit_sweep(k) = mean(fit_tmp(:));
                         aic_sweep(k) = aic(sys_try);
 
-                        % Independent error-model quality metrics from residuals
                         e_try_id = pe(zv, sys_try);
                         e_try = e_try_id.OutputData(:,1);
                         u_try = zv.InputData(:,1);
@@ -290,7 +224,6 @@ disp(array2table(score_table(sort_idx, :), ...
     'VariableNames', {'nb','nc','nd','nf','nk','fitPct','AIC', ...
     'nReuOut99','nReeOut99','fracReeOut99','noiseOrderNcNd','passWhiteness99'}));
 
-% Compare chosen nk with the alternate nk (0 <-> 1), holding other orders fixed.
 figure(51); clf;
 alt_orders = optimal_orders;
 alt_orders(5) = 1 - optimal_orders(5);
@@ -307,13 +240,9 @@ end
 grid minor;
 title('Delay comparison for best BJ structure');
 
-% For a consistent estimate, Reu (cross-correlation) must be within intervals
 figure(5); clf;
 resid(zv, sys_bj);
 
-% Explicit correlation diagnostics for report figure:
-% - R_eu(tau): consistency check of plant model G0
-% - R_ee(tau): whiteness test of residuals (noise model quality)
 e_id = pe(zv, sys_bj);
 e_val = e_id.OutputData;
 u_val = zv.InputData;
@@ -365,59 +294,44 @@ else
     fprintf('Residual whiteness test: FAIL/WEAK (residuals not fully white).\n');
 end
 
-% Time-domain cross validatipon
 figure(6); clf;
 compare(zv, sys_bj);
 grid minor;
 
-% Comparison with 2
 figure(7); clf;
 bode_spabj = bodeplot(Ghat_spa, 'b', sys_bj, 'r');
 bode_spabj.PhaseWrappingEnabled = true;
 showConfidence(bode_spabj);
 legend('Nonparametric (SPA)', 'Parametric (BJ)');
 grid minor;
-% If the BJ model passes the R_eu residual test but fails R_e, G0 is
-% consistently estimated, but the noise model (nc, nd) may need tweaking.
 
 %%% 3.3 Minimum variance estimate
-% Figure 52 (R_eu and R_ee with 99% bounds) is used for the consistency
-% and whiteness assessment in Part 3.3.
 present(sys_bj);
 
 %% Part 4: Experimental verification of variance estimates
 %%% 4.1 Monte Carlo simulations
-% Repeat Question 3 for 100 times: each run uses the same PRBS reference
-% but a new noise realization (from assignment_sys_18) and estimates a BJ model.
 n_mc = 100;
 orders = optimal_orders; % [nb nc nd nf nk] selected in 3.2
 n_B = orders(1);
 n_F = orders(4);
 
-% Use getpvec to extract parameters — guarantees same ordering as getcov
-% Parameter order: [B(n_B), C(n_C), D(n_D), F(n_F)]
 n_total = sum(orders(1:4)); % total free parameters
 params_all = zeros(n_mc, n_total);
 cov_diags = zeros(n_mc, n_total); % store getcov diagonal from each run
 sys_mc_all = cell(n_mc, 1); % store all MC models for envelope/pz visualization
 
-% Fix the PRBS across all MC runs so that only the noise realization varies.
-% This matches the getcov assumption of a fixed input design.
 r_mc = idinput(N_new, 'prbs', [0 1], [-M M]);
 
 for i = 1:n_mc
-    % Same reference signal, new noise realization from assignment_sys_18
     [u_mc, y_mc] = assignment_sys_18(r_mc, 'open loop');
     data_mc = iddata(y_mc, u_mc, 1, 'Domain', 'Time');
     ze_mc = detrend(data_mc(1:N_new/2), 0);
-    % Use the toolbox-compatible BJ syntax for each Monte Carlo run.
     sys_mc = bj(ze_mc, orders);
     sys_mc_all{i} = sys_mc;
     params_all(i,:) = getpvec(sys_mc)';
     cov_diags(i,:) = diag(getcov(sys_mc))';
 end
 
-% Bode envelope of all Monte Carlo estimates + nonparametric FRF estimate
 figure(19); clf;
 w_env = logspace(-3, log10(pi), 400);
 mag_mc_db = nan(n_mc, numel(w_env));
@@ -443,7 +357,6 @@ title('Part 4: Bode magnitude envelope of MC BJ estimates');
 legend('MC envelope (min-max)', 'MC median', 'Nonparametric FRF (SPA)', ...
     'Location', 'best');
 
-% Pole-zero map of all Monte Carlo BJ estimates
 figure(20); clf;
 hold on;
 th = linspace(0, 2*pi, 500);
@@ -466,13 +379,11 @@ title('Part 4: Pole-zero map of MC BJ estimates');
 legend('Unit circle', 'MC poles', 'MC zeros', 'Selected BJ poles', 'Selected BJ zeros', ...
     'Location', 'best');
 
-% Extract B and F columns from the parameter matrix
 idx_B = 1:n_B;
 idx_F = (n_total - n_F + 1):n_total;
 params_B = params_all(:, idx_B);
 params_F = params_all(:, idx_F);
 
-% Plot parameter distributions
 figure(11); clf;
 subplot(2,1,1);
 boxplot(params_B, 'Labels', compose('b_%d', 0:n_B-1));
@@ -485,14 +396,7 @@ ylabel('Value');
 title('F(q) coefficients over 100 MC runs');
 grid minor;
 
-% The parameters vary across runs because each experiment has a different
-% noise realization e(t). Since the noise enters the output, each dataset
-% yields a slightly different estimate. The variance depends on the
-% signal-to-noise ratio and the experiment length.
-
 %%% 4.2 Theoretical variance from one experiment
-% getcov returns the covariance matrix with the same parameter ordering
-% as getpvec: [B, C, D, F]
 P_cov = getcov(sys_bj);
 var_theo = diag(P_cov);
 var_B_theo = var_theo(idx_B);
@@ -502,8 +406,6 @@ fprintf('\n--- Theoretical variances (from getcov) ---\n');
 fprintf('B coefficients: '); fprintf('%.6e  ', var_B_theo); fprintf('\n');
 fprintf('F coefficients: '); fprintf('%.6e  ', var_F_theo); fprintf('\n');
 
-% Normalized parameter violin plots (z-scores) for scale-independent comparison.
-% Normalization uses the selected model parameters and theoretical std.
 p_ref = getpvec(sys_bj)';
 std_theo = sqrt(var_theo)';
 params_all_norm = bsxfun(@rdivide, bsxfun(@minus, params_all, p_ref), std_theo);
@@ -549,12 +451,6 @@ ylabel('Normalized value [z-score]');
 title('Normalized F(q) coefficients over 100 MC runs (violin)');
 grid minor;
 
-% The theoretical covariance is accurate when:
-% 1. The model structure is correct (contains the true system)
-% 2. The number of data points N is large (asymptotic result)
-% 3. The noise model is correctly specified
-% Under these conditions, the Cramér-Rao lower bound is achieved.
-
 %%% 4.3 Compare Monte Carlo variance with theoretical variance
 var_B_mc = var(params_B);
 var_F_mc = var(params_F);
@@ -581,17 +477,6 @@ var_F_theo_avg = avg_cov_diag(idx_F);
 fprintf('\n--- Comparison: MC variance / Average theoretical variance (over %d runs) ---\n', n_mc);
 fprintf('B ratios: '); fprintf('%.3f  ', var_B_mc ./ var_B_theo_avg); fprintf('\n');
 fprintf('F ratios: '); fprintf('%.3f  ', var_F_mc ./ var_F_theo_avg); fprintf('\n');
-
-% The theoretical covariance (getcov) is an asymptotic (N->inf) Cramer-Rao
-% lower bound based on a linearization of the prediction error.
-% Remaining discrepancies between MC variance and theoretical variance
-% are due to:
-% 1. Finite sample effects (N=1500 estimation samples)
-% 2. F parameters enter nonlinearly (as 1/F) in the BJ prediction error,
-%    making the linearized Cramer-Rao bound a loose lower bound for finite N
-% 3. Possible model misspecification if nf=4 does not fully capture G0's
-%    denominator dynamics
-% B parameters enter linearly, so their theoretical variance is tighter.
 
 %% Part 5: MIMO identification
 %%% 5.1 Parametric identification of a 2x2 MIMO system G0
