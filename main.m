@@ -1,7 +1,8 @@
 clearvars;
-% close all;
+close all;
 restoredefaultpath;
 rng(42); % Fix random seed for reproducibility
+plotting_header;
 
 q = tf('q');
 F = (0.7157 + 1.4315*q^-1 + 0.7157*q^-2)/(1 + 1.3490*q^-1 + 0.5140*q^-2);
@@ -224,24 +225,24 @@ disp(array2table(score_table(sort_idx, :), ...
     'VariableNames', {'nb','nc','nd','nf','nk','fitPct','AIC', ...
     'nReuOut99','nReeOut99','fracReeOut99','noiseOrderNcNd','passWhiteness99'}));
 
-figure(51); clf;
-alt_orders = optimal_orders;
-alt_orders(5) = 1 - optimal_orders(5);
-try
-    sys_bj_altnk = bj(ze, alt_orders);
-    compare(zv, sys_bj, sys_bj_altnk);
-    legend('Validation Data', ...
-        sprintf('BJ best [%d %d %d %d %d]', optimal_orders), ...
-        sprintf('BJ alt nk [%d %d %d %d %d]', alt_orders));
-catch
-    compare(zv, sys_bj);
-    legend('Validation Data', sprintf('BJ best [%d %d %d %d %d]', optimal_orders));
-end
-grid minor;
-title('Delay comparison for best BJ structure');
+% figure(51); clf;
+% alt_orders = optimal_orders;
+% alt_orders(5) = 1 - optimal_orders(5);
+% try
+%     sys_bj_altnk = bj(ze, alt_orders);
+%     compare(zv, sys_bj, sys_bj_altnk);
+%     legend('Validation Data', ...
+%         sprintf('BJ best [%d %d %d %d %d]', optimal_orders), ...
+%         sprintf('BJ alt nk [%d %d %d %d %d]', alt_orders));
+% catch
+%     compare(zv, sys_bj);
+%     legend('Validation Data', sprintf('BJ best [%d %d %d %d %d]', optimal_orders));
+% end
+% grid minor;
+% title('Delay comparison for best BJ structure');
 
-figure(5); clf;
-resid(zv, sys_bj);
+% figure(5); clf;
+% resid(zv, sys_bj);
 
 e_id = pe(zv, sys_bj);
 e_val = e_id.OutputData;
@@ -253,29 +254,44 @@ conf99 = 2.576 / sqrt(N_res);
 [Reu, lags_eu] = xcorr(e_val(:,1), u_val(:,1), max_lag, 'coeff');
 [Ree, lags_ee] = xcorr(e_val(:,1), e_val(:,1), max_lag, 'coeff');
 
-figure(52); clf;
-tiledlayout(2,1, 'TileSpacing', 'compact');
+f_residual = figure('units', 'centimeters', ...
+               'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*1], ...
+               'Name', 'Part 3: Residual correlation diagnostics');
+
+tiledlayout(2,1, 'TileSpacing', 'tight');
 nexttile;
-stem(lags_eu, Reu, 'filled');
+stem(lags_eu, Reu, 'filled', 'Color', color(1));
 hold on;
-yline(conf99, 'r--', '99% bound');
-yline(-conf99, 'r--');
-yline(0, 'k-');
-grid minor;
-xlabel('Lag \tau [samples]');
-ylabel('R_{\epsilon u}(\tau)');
-title(sprintf('Residual-input cross-correlation (BJ [%d %d %d %d %d])', optimal_orders));
+yline(conf99, '--', 'LineWidth', 1.25, 'Color', color(2));
+yline(-conf99, '--', 'LineWidth', 1.25, 'Color', color(2));
+yline(0, 'k-', 'LineWidth', 1.25);
+grid;
+ylabel('$R_{\epsilon u}(\tau)$', 'Interpreter', 'latex');
+xticklabels([]);
+set(gca, 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
+set(gca, 'MinorGridLineStyle', 'none');
+grid on;
 
 nexttile;
-stem(lags_ee, Ree, 'filled');
+stem(lags_ee, Ree, 'filled', 'Color', color(1));
 hold on;
-yline(conf99, 'r--', '99% bound');
-yline(-conf99, 'r--');
-yline(0, 'k-');
+yline(conf99, '--', 'LineWidth', 1.25, 'Color', color(2));
+yline(-conf99, '--', 'LineWidth', 1.25, 'Color', color(2));
+yline(0, 'k-', 'LineWidth', 1.25);
 grid minor;
-xlabel('Lag \tau [samples]');
-ylabel('R_{\epsilon\epsilon}(\tau)');
-title('Residual autocorrelation (whiteness test)');
+xlabel('Lag $\tau$ [-]', 'Interpreter', 'latex');
+ylabel('$R_{\epsilon\epsilon}(\tau)$', 'Interpreter', 'latex');
+set(gca, 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
+set(gca, 'MinorGridLineStyle', 'none');
+grid on;
+
+if fig_setup.export_figures
+    filename = "output-figures/residual_correlation" + fig_setup.img_ext;
+    exportgraphics(f_residual, filename, ...
+        'ContentType', fig_setup.img_format, ...
+        'BackgroundColor', 'none');
+    fprintf('Figure exported: %s\n', filename);
+end
 
 n_eu_out = sum(abs(Reu) > conf99);
 n_ee_out = sum(abs(Ree(lags_ee ~= 0)) > conf99);
@@ -294,16 +310,128 @@ else
     fprintf('Residual whiteness test: FAIL/WEAK (residuals not fully white).\n');
 end
 
-figure(6); clf;
-compare(zv, sys_bj);
-grid minor;
+f_time_bj_validation = figure('units', 'centimeters', ...
+               'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.45], ...
+               'Name', 'Part 3: Time-domain validation of BJ model');
+[y_bj, fit_bj, ~] = compare(zv, sys_bj);
+plot(zv.SamplingInstants, zv.OutputData, 'LineWidth', 0.25, 'Color', color(6), 'DisplayName', 'Data');
+hold on;
+plot(y_bj.SamplingInstants, y_bj.OutputData, 'LineWidth', 0.25, 'Color', color(1), 'DisplayName', 'BJ');
+grid on;
+xlabel('Time [samples]', 'Interpreter', 'latex');
+ylabel('Output $y(t)$', 'Interpreter', 'latex');
+legend('Location', 'northwest', 'Interpreter', 'latex');
+set(gca, 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
+set(gca, 'MinorGridLineStyle', 'none');
+if fig_setup.export_figures
+    filename = "output-figures/time_validation_bj" + fig_setup.img_ext;
+    exportgraphics(f_time_bj_validation, filename, ...
+        'ContentType', fig_setup.img_format, ...
+        'BackgroundColor', 'none');
+    fprintf('Figure exported: %s\n', filename);
+end
 
-figure(7); clf;
-bode_spabj = bodeplot(Ghat_spa, 'b', sys_bj, 'r');
-bode_spabj.PhaseWrappingEnabled = true;
-showConfidence(bode_spabj);
-legend('Nonparametric (SPA)', 'Parametric (BJ)');
-grid minor;
+% f_ps_prbs = figure('units', 'centimeters', ...
+%                'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.45], ...
+%                'Name', 'Part 3: Auto Power Spectrum of PRBS input');
+% [Puu, w] = pwelch(u3, [], [], [], 2*pi, 'power');
+% plot(w, 10*log10(Puu), 'LineWidth', 1.25, 'Color', color(1));
+% grid on;
+% xlabel('Frequency [rad/sample]', 'Interpreter', 'latex');
+% ylabel('Power Spectrum [dB]', 'Interpreter', 'latex');
+% set(gca, 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
+% set(gca, 'MinorGridLineStyle', 'none');
+% if fig_setup.export_figures
+%     filename = "output-figures/ps_prbs" + fig_setup.img_ext;
+%     exportgraphics(f_ps_prbs, filename, ...
+%         'ContentType', fig_setup.img_format, ...
+%         'BackgroundColor', 'none');
+%     fprintf('Figure exported: %s\n', filename);
+% end
+
+f_bode_spa_bj = figure('units', 'centimeters', ...
+               'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.9], ...
+               'Name', 'Part 3: Bode plots of SPA and BJ models');
+
+bodeopts = bodeoptions;
+bodeopts.XLim = [1e-1, 1e1];
+bodeopts.PhaseWrapping = 'on';
+bodeopts.Title.String = '';
+bodeopts.Grid = 'on';
+bodeopts.TickLabel.FontSize = fig_setup.fntsize;
+bodeopts.XLabel.Interpreter = 'latex';
+bodeopts.YLabel.Interpreter = 'latex';
+bodeopts.IOGrouping = 'all';
+
+% Create temporary copies to clear Input/Output names so the built-in labels disappear
+Ghat_plot = Ghat_spa;
+Ghat_plot.InputName = '';
+Ghat_plot.OutputName = '';
+sys_bj_plot = sys_bj;
+sys_bj_plot.InputName = '';
+sys_bj_plot.OutputName = '';
+
+bode_spabj = bodeplot(Ghat_plot, '-', sys_bj_plot, '-', bodeopts);
+showConfidence(bode_spabj, 1);
+% drawnow;
+
+ax_bode = findall(f_bode_spa_bj, 'Type', 'axes');
+min_y = inf;
+bottom_ax = [];
+for i_ax = 1:numel(ax_bode)
+    pos = get(ax_bode(i_ax), 'Position');
+    if pos(2) < min_y
+        min_y = pos(2);
+        bottom_ax = ax_bode(i_ax);
+    end
+end
+
+for i_ax = 1:numel(ax_bode)
+    set(ax_bode(i_ax), 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    set(ax_bode(i_ax), 'MinorGridLineStyle', 'none');
+    
+    ylab = get(ax_bode(i_ax), 'YLabel');
+    if ~isempty(get(ylab, 'String'))
+        ystr = char(get(ylab, 'String'));
+        ystr = strrep(strrep(ystr, '(', '['), ')', ']');
+        set(ylab, 'String', ystr, 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    end
+    
+    xlab = get(ax_bode(i_ax), 'XLabel');
+    if ax_bode(i_ax) == bottom_ax
+        % Setting arbitrary text can trigger bodeplot listeners to append (rad/s)
+        % To prevent this effectively, we append a trailing space or intercept it.
+        set(xlab, 'String', 'Frequency [rad/s]', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    else
+        set(xlab, 'String', '', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    end
+end
+
+line_bode = findall(f_bode_spa_bj, 'Type', 'line');
+for i_ln = 1:numel(line_bode)
+    ln_col = line_bode(i_ln).Color;
+    if isnumeric(ln_col) && numel(ln_col) == 3
+        if ln_col(3) >= ln_col(1)
+            line_bode(i_ln).Color = sscanf(char(color(1)), '#%2x%2x%2x', [1 3]) / 255;
+        else
+            line_bode(i_ln).Color = sscanf(char(color(2)), '#%2x%2x%2x', [1 3]) / 255;
+        end
+    end
+    line_bode(i_ln).LineWidth = 1.25;
+end
+
+% Create dummy line objects using 'line' to bypass LTI/Bodeplot strict axes checks
+h_spa = line(NaN, NaN, 'Color', color(1), 'LineWidth', 1.25, 'Parent', bottom_ax);
+h_bj  = line(NaN, NaN, 'Color', color(2), 'LineWidth', 1.25, 'Parent', bottom_ax);
+legend(bottom_ax, [h_spa, h_bj], {'SPA', 'BJ'}, 'Interpreter', 'latex', 'Location', 'northwest');
+
+if fig_setup.export_figures
+    filename = "output-figures/bode_spa_bj" + fig_setup.img_ext;
+    exportgraphics(f_bode_spa_bj, filename, ...
+        'ContentType', fig_setup.img_format, ...
+        'BackgroundColor', 'none');
+        fprintf('Figure exported: %s\n', filename);
+end
 
 %%% 3.3 Minimum variance estimate
 present(sys_bj);
@@ -332,69 +460,69 @@ for i = 1:n_mc
     cov_diags(i,:) = diag(getcov(sys_mc))';
 end
 
-figure(19); clf;
-w_env = logspace(-3, log10(pi), 400);
-mag_mc_db = nan(n_mc, numel(w_env));
-for i = 1:n_mc
-    G_mc = squeeze(freqresp(sys_mc_all{i}, w_env));
-    mag_mc_db(i, :) = 20*log10(abs(G_mc));
-end
-mag_min = min(mag_mc_db, [], 1);
-mag_max = max(mag_mc_db, [], 1);
-mag_med = median(mag_mc_db, 1);
-G_frf = squeeze(freqresp(Ghat_spa, w_env));
-mag_frf_db = 20*log10(abs(G_frf));
+% figure(19); clf;
+% w_env = logspace(-3, log10(pi), 400);
+% mag_mc_db = nan(n_mc, numel(w_env));
+% for i = 1:n_mc
+%     G_mc = squeeze(freqresp(sys_mc_all{i}, w_env));
+%     mag_mc_db(i, :) = 20*log10(abs(G_mc));
+% end
+% mag_min = min(mag_mc_db, [], 1);
+% mag_max = max(mag_mc_db, [], 1);
+% mag_med = median(mag_mc_db, 1);
+% G_frf = squeeze(freqresp(Ghat_spa, w_env));
+% mag_frf_db = 20*log10(abs(G_frf));
 
-fill([w_env, fliplr(w_env)], [mag_min, fliplr(mag_max)], ...
-    [0.85 0.90 1.00], 'EdgeColor', 'none', 'FaceAlpha', 0.6);
-hold on;
-semilogx(w_env, mag_med, 'b-', 'LineWidth', 1.5);
-semilogx(w_env, mag_frf_db, 'r-', 'LineWidth', 1.5);
-grid minor;
-xlabel('\omega [rad/sample]');
-ylabel('Magnitude [dB]');
-title('Part 4: Bode magnitude envelope of MC BJ estimates');
-legend('MC envelope (min-max)', 'MC median', 'Nonparametric FRF (SPA)', ...
-    'Location', 'best');
+% fill([w_env, fliplr(w_env)], [mag_min, fliplr(mag_max)], ...
+%     [0.85 0.90 1.00], 'EdgeColor', 'none', 'FaceAlpha', 0.6);
+% hold on;
+% semilogx(w_env, mag_med, 'b-', 'LineWidth', 1.5);
+% semilogx(w_env, mag_frf_db, 'r-', 'LineWidth', 1.5);
+% grid minor;
+% xlabel('\omega [rad/sample]');
+% ylabel('Magnitude [dB]');
+% title('Part 4: Bode magnitude envelope of MC BJ estimates');
+% legend('MC envelope (min-max)', 'MC median', 'Nonparametric FRF (SPA)', ...
+%     'Location', 'best');
 
-figure(20); clf;
-hold on;
-th = linspace(0, 2*pi, 500);
-plot(cos(th), sin(th), 'k--', 'LineWidth', 1.0);
-for i = 1:n_mc
-    p_i = pole(sys_mc_all{i});
-    z_i = zero(sys_mc_all{i});
-    plot(real(p_i), imag(p_i), 'rx', 'MarkerSize', 4);
-    plot(real(z_i), imag(z_i), 'bo', 'MarkerSize', 4);
-end
-p_best = pole(sys_bj);
-z_best = zero(sys_bj);
-plot(real(p_best), imag(p_best), 'r+', 'MarkerSize', 8, 'LineWidth', 1.5);
-plot(real(z_best), imag(z_best), 'bs', 'MarkerSize', 6, 'LineWidth', 1.2);
-grid minor;
-axis equal;
-xlabel('Real');
-ylabel('Imaginary');
-title('Part 4: Pole-zero map of MC BJ estimates');
-legend('Unit circle', 'MC poles', 'MC zeros', 'Selected BJ poles', 'Selected BJ zeros', ...
-    'Location', 'best');
+% figure(20); clf;
+% hold on;
+% th = linspace(0, 2*pi, 500);
+% plot(cos(th), sin(th), 'k--', 'LineWidth', 1.0);
+% for i = 1:n_mc
+%     p_i = pole(sys_mc_all{i});
+%     z_i = zero(sys_mc_all{i});
+%     plot(real(p_i), imag(p_i), 'rx', 'MarkerSize', 4);
+%     plot(real(z_i), imag(z_i), 'bo', 'MarkerSize', 4);
+% end
+% p_best = pole(sys_bj);
+% z_best = zero(sys_bj);
+% plot(real(p_best), imag(p_best), 'r+', 'MarkerSize', 8, 'LineWidth', 1.5);
+% plot(real(z_best), imag(z_best), 'bs', 'MarkerSize', 6, 'LineWidth', 1.2);
+% grid minor;
+% axis equal;
+% xlabel('Real');
+% ylabel('Imaginary');
+% title('Part 4: Pole-zero map of MC BJ estimates');
+% legend('Unit circle', 'MC poles', 'MC zeros', 'Selected BJ poles', 'Selected BJ zeros', ...
+%     'Location', 'best');
 
 idx_B = 1:n_B;
 idx_F = (n_total - n_F + 1):n_total;
 params_B = params_all(:, idx_B);
 params_F = params_all(:, idx_F);
 
-figure(11); clf;
-subplot(2,1,1);
-boxplot(params_B, 'Labels', compose('b_%d', 0:n_B-1));
-ylabel('Value');
-title('B(q) coefficients over 100 MC runs');
-grid minor;
-subplot(2,1,2);
-boxplot(params_F, 'Labels', compose('f_%d', 1:n_F));
-ylabel('Value');
-title('F(q) coefficients over 100 MC runs');
-grid minor;
+% figure(11); clf;
+% subplot(2,1,1);
+% boxplot(params_B, 'Labels', compose('b_%d', 0:n_B-1));
+% ylabel('Value');
+% title('B(q) coefficients over 100 MC runs');
+% grid minor;
+% subplot(2,1,2);
+% boxplot(params_F, 'Labels', compose('f_%d', 1:n_F));
+% ylabel('Value');
+% title('F(q) coefficients over 100 MC runs');
+% grid minor;
 
 %%% 4.2 Theoretical variance from one experiment
 P_cov = getcov(sys_bj);
@@ -412,44 +540,61 @@ params_all_norm = bsxfun(@rdivide, bsxfun(@minus, params_all, p_ref), std_theo);
 params_B_norm = params_all_norm(:, idx_B);
 params_F_norm = params_all_norm(:, idx_F);
 
-figure(21); clf;
-subplot(2,1,1);
+col1_rgb = sscanf(char(color(1)), '#%2x%2x%2x', [1 3]) / 255;
+col2_rgb = sscanf(char(color(2)), '#%2x%2x%2x', [1 3]) / 255;
+
+f_MC_violin = figure('units', 'centimeters', ...
+               'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.8], ...
+               'Name', 'Part 4: Normalized parameter distribution over MC runs (violin)');
+
+tiledlayout(2,1, 'TileSpacing', 'compact');
+nexttile;
 hold on;
 for j = 1:n_B
     v = params_B_norm(:, j);
     [f, xi] = ksdensity(v);
     f = 0.35 * f / max(f);
-    patch([j - f, fliplr(j + f)], [xi, fliplr(xi)], [0.35 0.55 0.90], ...
-        'FaceAlpha', 0.35, 'EdgeColor', [0.25 0.35 0.70]);
-    plot(j + 0*v, v, '.', 'Color', [0.25 0.35 0.70], 'MarkerSize', 5);
+    patch([j - f, fliplr(j + f)], [xi, fliplr(xi)], col1_rgb, ...
+        'FaceAlpha', 0.35, 'EdgeColor', col1_rgb);
+    plot(j + 0*v, v, '.', 'Color', color(1), 'MarkerSize', 5);
 end
-yline(0, 'k-');
-yline(3, 'r--');
-yline(-3, 'r--');
-set(gca, 'XTick', 1:n_B, 'XTickLabel', compose('b_%d', 0:n_B-1));
+yline(0, 'k-', 'LineWidth', 1.25);
+yline(3, '--', 'Color', col2_rgb, 'LineWidth', 1.25);
+yline(-3, '--', 'Color', col2_rgb, 'LineWidth', 1.25);
+set(gca, 'XTick', 1:n_B, 'XTickLabel', compose('$b_{%d}$', 0:n_B-1));
 xlim([0.5, n_B + 0.5]);
-ylabel('Normalized value [z-score]');
-title('Normalized B(q) coefficients over 100 MC runs (violin)');
-grid minor;
+ylabel('z-score [-]', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+set(gca, 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
+set(gca, 'MinorGridLineStyle', 'none');
+grid on;
 
-subplot(2,1,2);
+nexttile;
 hold on;
 for j = 1:n_F
     v = params_F_norm(:, j);
     [f, xi] = ksdensity(v);
     f = 0.35 * f / max(f);
-    patch([j - f, fliplr(j + f)], [xi, fliplr(xi)], [0.20 0.65 0.60], ...
-        'FaceAlpha', 0.35, 'EdgeColor', [0.10 0.50 0.45]);
-    plot(j + 0*v, v, '.', 'Color', [0.10 0.50 0.45], 'MarkerSize', 5);
+    patch([j - f, fliplr(j + f)], [xi, fliplr(xi)], col1_rgb, ...
+        'FaceAlpha', 0.35, 'EdgeColor', col1_rgb);
+    plot(j + 0*v, v, '.', 'Color', color(1), 'MarkerSize', 5);
 end
-yline(0, 'k-');
-yline(3, 'r--');
-yline(-3, 'r--');
-set(gca, 'XTick', 1:n_F, 'XTickLabel', compose('f_%d', 1:n_F));
+yline(0, 'k-', 'LineWidth', 1.25);
+yline(3, '--', 'Color', color(2), 'LineWidth', 1.25);
+yline(-3, '--', 'Color', color(2), 'LineWidth', 1.25);
+set(gca, 'XTick', 1:n_F, 'XTickLabel', compose('$f_{%d}$', 1:n_F));
 xlim([0.5, n_F + 0.5]);
-ylabel('Normalized value [z-score]');
-title('Normalized F(q) coefficients over 100 MC runs (violin)');
-grid minor;
+ylabel('z-score [-]', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+set(gca, 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
+set(gca, 'MinorGridLineStyle', 'none');
+grid on;
+
+if fig_setup.export_figures
+    filename = "output-figures/MC_violin" + fig_setup.img_ext;
+    exportgraphics(f_MC_violin, filename, ...
+        'ContentType', fig_setup.img_format, ...
+        'BackgroundColor', 'none');
+    fprintf('Figure exported: %s\n', filename);
+end
 
 %%% 4.3 Compare Monte Carlo variance with theoretical variance
 var_B_mc = var(params_B);
