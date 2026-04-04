@@ -399,6 +399,7 @@ n_F = orders(4);
 n_total = sum(orders(1:4)); % total free parameters
 params_all = zeros(n_mc, n_total);
 cov_diags = zeros(n_mc, n_total); % store getcov diagonal from each run
+sys_mc_all = cell(n_mc, 1); % store all MC models for envelope/pz visualization
 
 % Fix the PRBS across all MC runs so that only the noise realization varies.
 % This matches the getcov assumption of a fixed input design.
@@ -411,9 +412,59 @@ for i = 1:n_mc
     ze_mc = detrend(data_mc(1:N_new/2), 0);
     % Use the toolbox-compatible BJ syntax for each Monte Carlo run.
     sys_mc = bj(ze_mc, orders);
+    sys_mc_all{i} = sys_mc;
     params_all(i,:) = getpvec(sys_mc)';
     cov_diags(i,:) = diag(getcov(sys_mc))';
 end
+
+% Bode envelope of all Monte Carlo estimates + nonparametric FRF estimate
+figure(19); clf;
+w_env = logspace(-3, log10(pi), 400);
+mag_mc_db = nan(n_mc, numel(w_env));
+for i = 1:n_mc
+    G_mc = squeeze(freqresp(sys_mc_all{i}, w_env));
+    mag_mc_db(i, :) = 20*log10(abs(G_mc));
+end
+mag_min = min(mag_mc_db, [], 1);
+mag_max = max(mag_mc_db, [], 1);
+mag_med = median(mag_mc_db, 1);
+G_frf = squeeze(freqresp(Ghat_spa, w_env));
+mag_frf_db = 20*log10(abs(G_frf));
+
+fill([w_env, fliplr(w_env)], [mag_min, fliplr(mag_max)], ...
+    [0.85 0.90 1.00], 'EdgeColor', 'none', 'FaceAlpha', 0.6);
+hold on;
+semilogx(w_env, mag_med, 'b-', 'LineWidth', 1.5);
+semilogx(w_env, mag_frf_db, 'r-', 'LineWidth', 1.5);
+grid minor;
+xlabel('\omega [rad/sample]');
+ylabel('Magnitude [dB]');
+title('Part 4: Bode magnitude envelope of MC BJ estimates');
+legend('MC envelope (min-max)', 'MC median', 'Nonparametric FRF (SPA)', ...
+    'Location', 'best');
+
+% Pole-zero map of all Monte Carlo BJ estimates
+figure(20); clf;
+hold on;
+th = linspace(0, 2*pi, 500);
+plot(cos(th), sin(th), 'k--', 'LineWidth', 1.0);
+for i = 1:n_mc
+    p_i = pole(sys_mc_all{i});
+    z_i = zero(sys_mc_all{i});
+    plot(real(p_i), imag(p_i), 'rx', 'MarkerSize', 4);
+    plot(real(z_i), imag(z_i), 'bo', 'MarkerSize', 4);
+end
+p_best = pole(sys_bj);
+z_best = zero(sys_bj);
+plot(real(p_best), imag(p_best), 'r+', 'MarkerSize', 8, 'LineWidth', 1.5);
+plot(real(z_best), imag(z_best), 'bs', 'MarkerSize', 6, 'LineWidth', 1.2);
+grid minor;
+axis equal;
+xlabel('Real');
+ylabel('Imaginary');
+title('Part 4: Pole-zero map of MC BJ estimates');
+legend('Unit circle', 'MC poles', 'MC zeros', 'Selected BJ poles', 'Selected BJ zeros', ...
+    'Location', 'best');
 
 % Extract B and F columns from the parameter matrix
 idx_B = 1:n_B;
@@ -450,6 +501,53 @@ var_F_theo = var_theo(idx_F);
 fprintf('\n--- Theoretical variances (from getcov) ---\n');
 fprintf('B coefficients: '); fprintf('%.6e  ', var_B_theo); fprintf('\n');
 fprintf('F coefficients: '); fprintf('%.6e  ', var_F_theo); fprintf('\n');
+
+% Normalized parameter violin plots (z-scores) for scale-independent comparison.
+% Normalization uses the selected model parameters and theoretical std.
+p_ref = getpvec(sys_bj)';
+std_theo = sqrt(var_theo)';
+params_all_norm = bsxfun(@rdivide, bsxfun(@minus, params_all, p_ref), std_theo);
+params_B_norm = params_all_norm(:, idx_B);
+params_F_norm = params_all_norm(:, idx_F);
+
+figure(21); clf;
+subplot(2,1,1);
+hold on;
+for j = 1:n_B
+    v = params_B_norm(:, j);
+    [f, xi] = ksdensity(v);
+    f = 0.35 * f / max(f);
+    patch([j - f, fliplr(j + f)], [xi, fliplr(xi)], [0.35 0.55 0.90], ...
+        'FaceAlpha', 0.35, 'EdgeColor', [0.25 0.35 0.70]);
+    plot(j + 0*v, v, '.', 'Color', [0.25 0.35 0.70], 'MarkerSize', 5);
+end
+yline(0, 'k-');
+yline(3, 'r--');
+yline(-3, 'r--');
+set(gca, 'XTick', 1:n_B, 'XTickLabel', compose('b_%d', 0:n_B-1));
+xlim([0.5, n_B + 0.5]);
+ylabel('Normalized value [z-score]');
+title('Normalized B(q) coefficients over 100 MC runs (violin)');
+grid minor;
+
+subplot(2,1,2);
+hold on;
+for j = 1:n_F
+    v = params_F_norm(:, j);
+    [f, xi] = ksdensity(v);
+    f = 0.35 * f / max(f);
+    patch([j - f, fliplr(j + f)], [xi, fliplr(xi)], [0.20 0.65 0.60], ...
+        'FaceAlpha', 0.35, 'EdgeColor', [0.10 0.50 0.45]);
+    plot(j + 0*v, v, '.', 'Color', [0.10 0.50 0.45], 'MarkerSize', 5);
+end
+yline(0, 'k-');
+yline(3, 'r--');
+yline(-3, 'r--');
+set(gca, 'XTick', 1:n_F, 'XTickLabel', compose('f_%d', 1:n_F));
+xlim([0.5, n_F + 0.5]);
+ylabel('Normalized value [z-score]');
+title('Normalized F(q) coefficients over 100 MC runs (violin)');
+grid minor;
 
 % The theoretical covariance is accurate when:
 % 1. The model structure is correct (contains the true system)
