@@ -24,7 +24,7 @@ M = max(u1); % == -1 * min(u)
 %%% 2.1 Frequency behavior of G_0
 % Reference design:
 % - Within saturation bounds
-% - Open loop FRF estimate: Schroeder phase multisine signal excites all 
+% - Open loop FRF estimate: Schroeder phase multisine signal excites all
 %   frequencies with deterministic amplitude spectrum and good crest factor
 % - Periodic signal to prevent leakage
 
@@ -39,38 +39,59 @@ r2 = repmat(M * multisine([0,0.49],1,p),1,n);
 
 [u2,y2] = assignment_sys_18(r2,'open loop');
 
-frfdata = iddata(y2,u2,1,Domain='Time',Period=p);
 
 % Check for transient effects
 u2last = u2((n-1)*p+1:n*p);
 y2last = y2((n-1)*p+1:n*p);
-figure(1);clf;
-tiledlayout(TileSpacing='compact');
-nexttile;
-for i = 1:n
-    u2plot = u2((i-1)*p+1:i*p) - u2last;
+
+f_transient = figure('units', 'centimeters', ...
+    'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.7], ...
+    'Name', 'Part 2: Transient Detection');clf;
+tiledlayout(2,1,TileSpacing='tight');
+nexttile;hold on;box on;
+for i = 1:n-1
+    u2plot = log(abs( u2((i-1)*p+1:i*p) - u2last ));
     plot((i-1)*p+1:i*p,u2plot);
-    hold on;
 end
-ylabel('u');
-nexttile;
-for i = 1:n
-    y2plot = y2((i-1)*p+1:i*p) - y2last; % Remove steady-state offset
-    plot((i-1)*p+1:i*p,y2plot);
-    hold on;
+xline(1*p, ':k');
+yline(log(0.001),'-k','0.1\% error','Interpreter','latex','LineWidth',1.25,'LabelVerticalAlignment','bottom');
+yline(log(eps),'-k','Precision floor','Interpreter','latex','LineWidth',1.25);
+ylabel('$\log \left| u-u_n \right|$','Interpreter','latex');
+xlim([0 N]);
+ylim([-40 0]);
+xticklabels([]);
+
+nexttile;hold on;box on;
+for i = 1:n-1
+    y2plot = log(abs( y2((i-1)*p+1:i*p) - y2last ));
+    plot((i-1)*p+1:i*p,y2plot,'Color',color(mod(i-1,7)+1));
+    xline(i*p, ':k');
 end
-ylabel('y');
-xlabel('t');
+ylabel('$\log \left| y-y_n \right|$','Interpreter','latex');
+xlabel('Time [samples]','Interpreter','latex');
+xlim([0 N-p]);
+ylim([-10 0]);
+set(gca, 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
+
+if fig_setup.export_figures
+    filename = "output-figures/transient detection" + fig_setup.img_ext;
+    exportgraphics(f_transient, filename, ...
+        'ContentType', fig_setup.img_format, ...
+        'BackgroundColor', 'none');
+    fprintf('Figure exported: %s\n', filename);
+end
 
 % Result: transient negligible, input affected for first ~20 samples
+frfdata = iddata(y2,u2,1,Domain='Time',Period=p);
 
 %%% 2.2 Identify system FRF
-Ghat_spa = spa(frfdata);
+w = 2*pi/p:2*pi/p:pi;
+Ghat_spa = spa(frfdata,p,w);
 
 f2 = figure(2);clf;
 Ghat_bode = bodeplot(Ghat_spa);
 Ghat_bode.PhaseWrappingEnabled = true;
-showConfidence(Ghat_bode);
+showConfidence(Ghat_bode,3);
 legend;
 grid minor;
 
@@ -85,7 +106,7 @@ grid minor;
 figure(3);clf;
 
 error_spectrum = spectrumplot(Ghat_spa);
-showConfidence(error_spectrum);
+showConfidence(error_spectrum,3);
 grid minor;
 
 % The noise spectrum is concentrated around 2 rad/s
@@ -255,8 +276,8 @@ conf99 = 2.576 / sqrt(N_res);
 [Ree, lags_ee] = xcorr(e_val(:,1), e_val(:,1), max_lag, 'coeff');
 
 f_residual = figure('units', 'centimeters', ...
-               'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.6], ...
-               'Name', 'Part 3: Residual correlation diagnostics');
+    'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.6], ...
+    'Name', 'Part 3: Residual correlation diagnostics');
 
 tiledlayout(2,1, 'TileSpacing', 'tight');
 nexttile;
@@ -311,8 +332,8 @@ else
 end
 
 f_time_bj_validation = figure('units', 'centimeters', ...
-               'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.45], ...
-               'Name', 'Part 3: Time-domain validation of BJ model');
+    'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.45], ...
+    'Name', 'Part 3: Time-domain validation of BJ model');
 [y_bj, fit_bj, ~] = compare(zv, sys_bj);
 plot(zv.SamplingInstants, zv.OutputData, 'LineWidth', 0.25, 'Color', color(6), 'DisplayName', 'Data');
 hold on;
@@ -350,8 +371,8 @@ end
 % end
 
 f_bode_spa_bj = figure('units', 'centimeters', ...
-               'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.7], ...
-               'Name', 'Part 3: Bode plots of SPA and BJ models');
+    'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.7], ...
+    'Name', 'Part 3: Bode plots of SPA and BJ models');
 
 bodeopts = bodeoptions;
 bodeopts.XLim = [1e-1, 1e1];
@@ -372,7 +393,7 @@ sys_bj_plot.InputName = '';
 sys_bj_plot.OutputName = '';
 
 bode_spabj = bodeplot(Ghat_plot, '-', sys_bj_plot, '-', bodeopts);
-showConfidence(bode_spabj, 1);
+showConfidence(bode_spabj, 3);
 % drawnow;
 
 ax_bode = findall(f_bode_spa_bj, 'Type', 'axes');
@@ -389,14 +410,14 @@ end
 for i_ax = 1:numel(ax_bode)
     set(ax_bode(i_ax), 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
     set(ax_bode(i_ax), 'MinorGridLineStyle', 'none');
-    
+
     ylab = get(ax_bode(i_ax), 'YLabel');
     if ~isempty(get(ylab, 'String'))
         ystr = char(get(ylab, 'String'));
         ystr = strrep(strrep(ystr, '(', '['), ')', ']');
         set(ylab, 'String', ystr, 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
     end
-    
+
     xlab = get(ax_bode(i_ax), 'XLabel');
     if ax_bode(i_ax) == bottom_ax
         % Setting arbitrary text can trigger bodeplot listeners to append (rad/s)
@@ -430,7 +451,7 @@ if fig_setup.export_figures
     exportgraphics(f_bode_spa_bj, filename, ...
         'ContentType', fig_setup.img_format, ...
         'BackgroundColor', 'none');
-        fprintf('Figure exported: %s\n', filename);
+    fprintf('Figure exported: %s\n', filename);
 end
 
 %%% 3.3 Minimum variance estimate
@@ -544,8 +565,8 @@ col1_rgb = sscanf(char(color(1)), '#%2x%2x%2x', [1 3]) / 255;
 col2_rgb = sscanf(char(color(2)), '#%2x%2x%2x', [1 3]) / 255;
 
 f_MC_violin = figure('units', 'centimeters', ...
-               'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.6], ...
-               'Name', 'Part 4: Normalized parameter distribution over MC runs (violin)');
+    'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.6], ...
+    'Name', 'Part 4: Normalized parameter distribution over MC runs (violin)');
 
 tiledlayout(2,1, 'TileSpacing', 'compact');
 nexttile;
@@ -744,7 +765,7 @@ title('MIMO residual analysis');
 % Bode plot of the identified 2x2 transfer matrix
 figure(17); clf;
 bode_mimo = bodeplot(sys_mimo);
-showConfidence(bode_mimo);
+showConfidence(bode_mimo,3);
 grid minor;
 title('Identified MIMO system G_0(q)');
 
