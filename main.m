@@ -87,9 +87,11 @@ frfdata = iddata(y2,u2,1,Domain='Time',Period=p);
 %%% 2.2 Identify system FRF
 w = 2*pi/p:2*pi/p:pi;
 Ghat_spa = spa(frfdata,p,w);
+Ghat_etfe = etfe(frfdata);
+
 
 f2 = figure(2);clf;
-Ghat_bode = bodeplot(Ghat_spa);
+Ghat_bode = bodeplot(Ghat_etfe);
 Ghat_bode.PhaseWrappingEnabled = true;
 showConfidence(Ghat_bode,3);
 legend;
@@ -370,9 +372,9 @@ end
 %     fprintf('Figure exported: %s\n', filename);
 % end
 
-f_bode_spa_bj = figure('units', 'centimeters', ...
+f_bode_etfe_bj = figure('units', 'centimeters', ...
     'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.7], ...
-    'Name', 'Part 3: Bode plots of SPA and BJ models');
+    'Name', 'Part 3: Bode plots of etfe and BJ models');
 
 bodeopts = bodeoptions;
 bodeopts.XLim = [1e-1, 1e1];
@@ -385,18 +387,18 @@ bodeopts.YLabel.Interpreter = 'latex';
 bodeopts.IOGrouping = 'all';
 
 % Create temporary copies to clear Input/Output names so the built-in labels disappear
-Ghat_plot = Ghat_spa;
+Ghat_plot = Ghat_etfe;
 Ghat_plot.InputName = '';
 Ghat_plot.OutputName = '';
 sys_bj_plot = sys_bj;
 sys_bj_plot.InputName = '';
 sys_bj_plot.OutputName = '';
 
-bode_spabj = bodeplot(Ghat_plot, '-', sys_bj_plot, '-', bodeopts);
-showConfidence(bode_spabj, 3);
+bode_etfebj = bodeplot(Ghat_plot, '-', sys_bj_plot, '-', bodeopts);
+showConfidence(bode_etfebj, 3);
 % drawnow;
 
-ax_bode = findall(f_bode_spa_bj, 'Type', 'axes');
+ax_bode = findall(f_bode_etfe_bj, 'Type', 'axes');
 min_y = inf;
 bottom_ax = [];
 for i_ax = 1:numel(ax_bode)
@@ -428,7 +430,7 @@ for i_ax = 1:numel(ax_bode)
     end
 end
 
-line_bode = findall(f_bode_spa_bj, 'Type', 'line');
+line_bode = findall(f_bode_etfe_bj, 'Type', 'line');
 for i_ln = 1:numel(line_bode)
     ln_col = line_bode(i_ln).Color;
     if isnumeric(ln_col) && numel(ln_col) == 3
@@ -442,13 +444,13 @@ for i_ln = 1:numel(line_bode)
 end
 
 % Create dummy line objects using 'line' to bypass LTI/Bodeplot strict axes checks
-h_spa = line(NaN, NaN, 'Color', color(1), 'LineWidth', 1.25, 'Parent', bottom_ax);
+h_etfe = line(NaN, NaN, 'Color', color(1), 'LineWidth', 1.25, 'Parent', bottom_ax);
 h_bj  = line(NaN, NaN, 'Color', color(2), 'LineWidth', 1.25, 'Parent', bottom_ax);
-legend(bottom_ax, [h_spa, h_bj], {'SPA', 'BJ'}, 'Interpreter', 'latex', 'Location', 'northwest');
+legend(bottom_ax, [h_etfe, h_bj], {'ETFE', 'BJ'}, 'Interpreter', 'latex', 'Location', 'northwest');
 
 if fig_setup.export_figures
-    filename = "output-figures/bode_spa_bj" + fig_setup.img_ext;
-    exportgraphics(f_bode_spa_bj, filename, ...
+    filename = "output-figures/bode_etfe_bj" + fig_setup.img_ext;
+    exportgraphics(f_bode_etfe_bj, filename, ...
         'ContentType', fig_setup.img_format, ...
         'BackgroundColor', 'none');
     fprintf('Figure exported: %s\n', filename);
@@ -491,7 +493,7 @@ end
 % mag_min = min(mag_mc_db, [], 1);
 % mag_max = max(mag_mc_db, [], 1);
 % mag_med = median(mag_mc_db, 1);
-% G_frf = squeeze(freqresp(Ghat_spa, w_env));
+% G_frf = squeeze(freqresp(Ghat_etfe, w_env));
 % mag_frf_db = 20*log10(abs(G_frf));
 
 % fill([w_env, fliplr(w_env)], [mag_min, fliplr(mag_max)], ...
@@ -503,7 +505,7 @@ end
 % xlabel('\omega [rad/sample]');
 % ylabel('Magnitude [dB]');
 % title('Part 4: Bode magnitude envelope of MC BJ estimates');
-% legend('MC envelope (min-max)', 'MC median', 'Nonparametric FRF (SPA)', ...
+% legend('MC envelope (min-max)', 'MC median', 'Nonparametric FRF (etfe)', ...
 %     'Location', 'best');
 
 % figure(20); clf;
