@@ -90,26 +90,137 @@ Ghat_spa = spa(frfdata,p,w);
 Ghat_etfe = etfe(frfdata);
 
 
-f2 = figure(2);clf;
-Ghat_bode = bodeplot(Ghat_etfe);
-Ghat_bode.PhaseWrappingEnabled = true;
-showConfidence(Ghat_bode,3);
-legend;
-grid minor;
+f_bode_etfe = figure('units', 'centimeters', ...
+    'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.7], ...
+    'Name', 'Part 2: Bode plot of ETFE model');
+
+bodeopts = bodeoptions;
+bodeopts.XLim = [1e-1, 1e1];
+bodeopts.PhaseWrapping = 'on';
+bodeopts.Title.String = '';
+bodeopts.Grid = 'on';
+bodeopts.TickLabel.FontSize = fig_setup.fntsize;
+bodeopts.XLabel.Interpreter = 'latex';
+bodeopts.YLabel.Interpreter = 'latex';
+bodeopts.IOGrouping = 'all';
+
+Ghat_plot = Ghat_etfe;
+Ghat_plot.InputName = '';
+Ghat_plot.OutputName = '';
+
+bode_etfe = bodeplot(Ghat_plot, bodeopts);
+
+ax_bode = findall(f_bode_etfe, 'Type', 'axes');
+min_y = inf;
+bottom_ax = [];
+for i_ax = 1:numel(ax_bode)
+    pos = get(ax_bode(i_ax), 'Position');
+    if pos(2) < min_y
+        min_y = pos(2);
+        bottom_ax = ax_bode(i_ax);
+    end
+end
+
+for i_ax = 1:numel(ax_bode)
+    set(ax_bode(i_ax), 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    set(ax_bode(i_ax), 'MinorGridLineStyle', 'none');
+
+    ylab = get(ax_bode(i_ax), 'YLabel');
+    if ~isempty(get(ylab, 'String'))
+        ystr = char(get(ylab, 'String'));
+        ystr = strrep(strrep(ystr, '(', '['), ')', ']');
+        set(ylab, 'String', ystr, 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    end
+
+    xlab = get(ax_bode(i_ax), 'XLabel');
+    if ax_bode(i_ax) == bottom_ax
+        set(xlab, 'String', 'Frequency [rad/s]', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    else
+        set(xlab, 'String', '', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    end
+end
+
+line_bode = findall(f_bode_etfe, 'Type', 'line');
+for i_ln = 1:numel(line_bode)
+    line_bode(i_ln).Color = sscanf(char(color(1)), '#%2x%2x%2x', [1 3]) / 255;
+    line_bode(i_ln).LineWidth = 1.25;
+end
+
+% h_etfe = line(NaN, NaN, 'Color', color(1), 'LineWidth', 1.25, 'Parent', bottom_ax);
+% legend(bottom_ax, h_etfe, {'ETFE'}, 'Interpreter', 'latex', 'Location', 'northwest');
+
+if fig_setup.export_figures
+    filename = "output-figures/bode_etfe" + fig_setup.img_ext;
+    exportgraphics(f_bode_etfe, filename, ...
+        'ContentType', fig_setup.img_format, ...
+        'BackgroundColor', 'none');
+    fprintf('Figure exported: %s\n', filename);
+end
 
 % Result:
 % - Anti-resonance around 1.2 rad/s (two complex zeros)
-% - Resonance around 2.03 rad/s (two complex poles)
-% - Anti-resonance around 2.63 rad/s (two complex zeros)
+% - Resonance around 2.0 rad/s (two complex poles)
+% - Anti-resonance around 2.7 rad/s (two complex zeros)
 % - DC gain -50 dB
 
 
 %%% 2.3 Plot the magnitude of the estimated noise power spectrum
-figure(3);clf;
+f_error_spectrum = figure('units', 'centimeters', ...
+    'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.5], ...
+    'Name', 'Part 2: Estimated noise power spectrum');
 
-error_spectrum = spectrumplot(Ghat_spa);
-showConfidence(error_spectrum,3);
-grid minor;
+specopts = spectrumoptions;
+specopts.XLim = [1e-1, 1e1];
+specopts.Title.String = '';
+specopts.Grid = 'on';
+specopts.TickLabel.FontSize = fig_setup.fntsize;
+specopts.XLabel.Interpreter = 'latex';
+specopts.YLabel.Interpreter = 'latex';
+
+Ghat_spa_plot = Ghat_spa;
+Ghat_spa_plot.OutputName = '';
+
+error_spectrum = spectrumplot(Ghat_spa_plot, specopts);
+
+ax_spec = findall(f_error_spectrum, 'Type', 'axes');
+for i_ax = 1:numel(ax_spec)
+    set(ax_spec(i_ax), 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    set(ax_spec(i_ax), 'MinorGridLineStyle', 'none');
+
+    ylab = get(ax_spec(i_ax), 'YLabel');
+    if ~isempty(get(ylab, 'String'))
+        ystr = char(get(ylab, 'String'));
+        ystr = strrep(strrep(ystr, '(', '['), ')', ']');
+        set(ylab, 'String', ystr, 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    end
+
+    xlab = get(ax_spec(i_ax), 'XLabel');
+    if i_ax == 1
+        set(xlab, 'String', 'Frequency [rad/s]', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    else
+        set(xlab, 'String', '', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    end
+end
+
+line_spec = findall(f_error_spectrum, 'Type', 'line');
+for i_ln = 1:numel(line_spec)
+    xdat = get(line_spec(i_ln), 'XData');
+    % Keep vertical reference lines (e.g., Nyquist marker) at default color.
+    if isnumeric(xdat) && numel(xdat) >= 2 && (max(xdat) - min(xdat) < 1e-12)
+        line_spec(i_ln).LineWidth = 1.25;
+        continue;
+    end
+    line_spec(i_ln).Color = sscanf(char(color(1)), '#%2x%2x%2x', [1 3]) / 255;
+    line_spec(i_ln).LineWidth = 1.25;
+end
+
+if fig_setup.export_figures
+    filename = "output-figures/error_spectrum_spa" + fig_setup.img_ext;
+    exportgraphics(f_error_spectrum, filename, ...
+        'ContentType', fig_setup.img_format, ...
+        'BackgroundColor', 'none');
+    fprintf('Figure exported: %s\n', filename);
+end
 
 % The noise spectrum is concentrated around 2 rad/s
 
@@ -395,7 +506,7 @@ sys_bj_plot.InputName = '';
 sys_bj_plot.OutputName = '';
 
 bode_etfebj = bodeplot(Ghat_plot, '-', sys_bj_plot, '-', bodeopts);
-showConfidence(bode_etfebj, 3);
+showConfidence(bode_etfebj, 1);
 % drawnow;
 
 ax_bode = findall(f_bode_etfe_bj, 'Type', 'axes');
@@ -767,7 +878,7 @@ title('MIMO residual analysis');
 % Bode plot of the identified 2x2 transfer matrix
 figure(17); clf;
 bode_mimo = bodeplot(sys_mimo);
-showConfidence(bode_mimo,3);
+showConfidence(bode_mimo,1);
 grid minor;
 title('Identified MIMO system G_0(q)');
 
