@@ -762,8 +762,7 @@ fprintf('F ratios: '); fprintf('%.3f  ', var_F_mc ./ var_F_theo_avg); fprintf('\
 N_mimo = 3000;
 
 % Input design: two uncorrelated PRBS signals (one per input channel).
-% Generate both channels in one idinput call for MATLAB-version compatibility.
-% Independent channels are critical for separating the contribution of each input to each
+% Independent channels for separating the contribution of each input to each
 % output. Uncorrelated inputs prevent ill-conditioning in the regressor
 % matrix (analogous to the requirement that Phi_uu is full rank at all
 % frequencies for MIMO identifiability).
@@ -772,6 +771,8 @@ N_mimo = 3000;
 r5 = idinput([N_mimo 2], 'prbs', [0 1], [-M M]); % size (N_mimo, 2)
 
 [u5, y5] = assignment_sys_18(r5, 'MIMO');
+nu = size(u5, 2);
+ny = size(y5, 2);
 
 data_mimo = iddata(y5, u5, 1, 'Domain', 'Time');
 
@@ -796,100 +797,237 @@ xlabel('Samples');
 ze_mimo = detrend(data_mimo(1:N_mimo/2), 0);
 zv_mimo = detrend(data_mimo(N_mimo/2+1:end), 0);
 
-%%% Model structure choice: state-space via subspace identification (n4sid)
-% For MIMO systems, state-space models are more natural than polynomial
-% (BJ/OE) models because:
-% 1. A single state-space model captures all input-output channels
-%    simultaneously with shared state dynamics.
-% 2. Polynomial MIMO models require specifying separate orders for each
-%    transfer function entry (4 B polynomials + 4 F polynomials for a 2x2),
-%    which is cumbersome and prone to over-parameterization.
-% 3. Subspace methods (n4sid) provide a non-iterative, numerically robust
-%    initial estimate without local minima issues.
+%%% Kung algorithm (Ho-Kalman adaptation for noisy data)
+% Step 0: estimate Markov parameters g_tau from data using impulseest.
+ng = 80;      % number of impulse coefficients (must satisfy ng >= no + nc)
+no = 20;      % number of block rows in the Hankel matrix
+nc = 20;      % number of block columns in the Hankel matrix
 
-% Determine model order using singular value analysis
-% figure(13); clf;
-n4sid(ze_mimo);
-title('Singular values for MIMO model order selection');
-% Inspect the singular value plot: look for a clear gap indicating the
-% appropriate model order. Select the order where the singular values
-% drop significantly.
-
-% From the SISO identification (Part 3), we expect:
-% - 2 complex pole pairs (resonance + anti-resonance dynamics) per channel
-%   → order ~4-8 for the plant dynamics
-% Try a range of orders and compare validation fit
-n_orders = 2:12;
-sys_mimo_candidates = cell(length(n_orders), 1);
-fit_scores = zeros(length(n_orders), 1);
-
-for idx = 1:length(n_orders)
-    sys_mimo_candidates{idx} = n4sid(ze_mimo, n_orders(idx), 'Focus', 'sim');
+if ng < no + nc
+    error('Choose ng >= no + nc for Kung realization.');
 end
 
-% Compare all candidates on validation data
-figure(14); clf;
-compare(zv_mimo, sys_mimo_candidates{:});
-legend(['Validation Data', compose('n=%d', n_orders)]);
-grid minor;
-title('MIMO model order comparison');
+sys_ir = impulseest(ze_mimo, ng);
+t_ir = 0:ng;
+g_ir = impulse(sys_ir, t_ir); % size: (ng+1) x ny x nu
 
-% Select the best order based on validation fit (best compare %)
-% Use a parsimony criterion: pick the lowest order that achieves a fit
-% close to the best (within ~2-3% of the maximum)
-for idx = 1:length(n_orders)
-    [~, fit_tmp] = compare(zv_mimo, sys_mimo_candidates{idx});
-    fit_scores(idx) = mean(fit_tmp); % average fit across output channels
-end
-fprintf('\n--- MIMO model order selection ---\n');
-for idx = 1:length(n_orders)
-    fprintf('  n=%2d: avg fit = %.1f%%\n', n_orders(idx), fit_scores(idx));
+g_seq = cell(ng + 1, 1);
+for tau = 0:ng
+    g_seq{tau + 1} = reshape(g_ir(tau + 1, :, :), [ny, nu]);
 end
 
-[best_fit, best_idx] = max(fit_scores);
-% Pick lowest order within 3% of the best fit (parsimony)
-threshold = best_fit - 3;
-chosen_idx = find(fit_scores >= threshold, 1, 'first');
-n_chosen = n_orders(chosen_idx);
-fprintf('Best fit: n=%d (%.1f%%), chosen (parsimony): n=%d (%.1f%%)\n', ...
-    n_orders(best_idx), best_fit, n_chosen, fit_scores(chosen_idx));
+% Steps 1-2: build block Hankel matrices and perform SVD.
+H = zeros(no * ny, nc * nu);
+H_shift = zeros(no * ny, nc * nu);
+for i = 1:no
+    row_idx = (i - 1) * ny + (1:ny);
+    for j = 1:nc
+        col_idx = (j - 1) * nu + (1:nu);
+        H(row_idx, col_idx) = g_seq{i + j};      % g_{i+j-1}
+        H_shift(row_idx, col_idx) = g_seq{i + j + 1}; % g_{i+j}
+    end
+end
 
-sys_mimo_n4sid = sys_mimo_candidates{chosen_idx};
+[U_h, S_h, V_h] = svd(H, 'econ');
+sing_vals = diag(S_h);
+n_max_plot = 20;
 
-%%% Refine with ssest (prediction error minimization)
-% n4sid provides a consistent but not necessarily efficient estimate.
-% ssest refines it by minimizing the prediction error (PEM), using the
-% n4sid result as initial condition to avoid local minima.
-sys_mimo = ssest(ze_mimo, sys_mimo_n4sid);
+f_svd_mimo = figure('units', 'centimeters', ...
+    'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.5], ...
+    'Name', 'Part 5: Singular values of block Hankel matrix'); clf;
+stem(1:numel(sing_vals(1:n_max_plot)), sing_vals(1:n_max_plot), 'o-', 'LineWidth', 1.25, 'Color', color(1));
+grid on;
+xlabel('Order index', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+ylabel('Singular value [-]', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+set(gca, 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
+set(gca, 'MinorGridLineStyle', 'none');
 
-% Validation: compare on validation data
+% Step 2.5: choose reduced rank n directly from the SVD drop-off.
+% n_chosen = 6 based on being the last significant singular value.
+n = 6;
+
+hold on;
+xline(n, '--', 'Color', color(2), 'LineWidth', 1.25);
+hold off;
+
+if fig_setup.export_figures
+    filename = "output-figures/mimo_kung_svd" + fig_setup.img_ext;
+    exportgraphics(f_svd_mimo, filename, ...
+        'ContentType', fig_setup.img_format, ...
+        'BackgroundColor', 'none');
+    fprintf('Figure exported: %s\n', filename);
+end
+
+sv_ratio = sing_vals(1:end-1) ./ sing_vals(2:end);
+drop_db = 20*log10(sv_ratio);
+
+fprintf('\n--- Kung MIMO model-order selection (SVD-based) ---\n');
+fprintf('Chosen order n = %d\n', n);
+fprintf('Singular-value drop at n: %.2f dB\n', drop_db(n));
+
+% Steps 3-4: realization for chosen reduced rank n.
+D_kung = g_seq{1}; % direct feedthrough estimate (g_0)
+U_n = U_h(:, 1:n);
+S_n = S_h(1:n, 1:n);
+V_n = V_h(:, 1:n);
+
+sqrt_Sn = diag(sqrt(diag(S_n)));
+inv_sqrt_Sn = diag(1 ./ sqrt(diag(S_n)));
+
+O_n = U_n * sqrt_Sn;
+R_n = sqrt_Sn * V_n';
+
+C_n = O_n(1:ny, :);
+B_n = R_n(:, 1:nu);
+A_n = inv_sqrt_Sn * (U_n' * H_shift * V_n) * inv_sqrt_Sn;
+
+sys_kung_ss = ss(A_n, B_n, C_n, D_kung, 1);
+sys_mimo_kung = idss(sys_kung_ss);
+
+% PEM-SS refinement initialized from the Kung realization.
+opt_pem_mimo = ssestOptions;
+opt_pem_mimo.Focus = 'prediction';
+sys_mimo = ssest(ze_mimo, sys_mimo_kung, opt_pem_mimo);
+
+[~, fit_kung] = compare(zv_mimo, sys_mimo_kung);
+[~, fit_pem] = compare(zv_mimo, sys_mimo);
+fit_kung_avg = mean(fit_kung(:));
+fit_pem_avg = mean(fit_pem(:));
+
+fprintf('\n--- MIMO model refinement (Kung -> PEM-SS) ---\n');
+fprintf('Validation fit (Kung)   : %.2f%%\n', fit_kung_avg);
+fprintf('Validation fit (PEM-SS) : %.2f%%\n', fit_pem_avg);
+fprintf('Fit improvement         : %+0.2f%%\n', fit_pem_avg - fit_kung_avg);
+
+% Validation plot: show only the final PEM-SS model (Kung and PEM are
+% typically very close, so numerical fit comparison is reported above).
 figure(15); clf;
-compare(zv_mimo, sys_mimo_n4sid, sys_mimo);
-legend('Validation Data', sprintf('n4sid (n=%d)', n_chosen), ...
-    sprintf('ssest (n=%d)', n_chosen));
+compare(zv_mimo, sys_mimo);
+legend('Validation Data', sprintf('PEM-SS (init: Kung, n=%d)', n));
 grid minor;
-title('MIMO: n4sid vs ssest refinement');
+title('MIMO: final PEM-SS model initialized from Kung realization');
 
-% Residual analysis for consistency check
-figure(16); clf;
-resid(zv_mimo, sys_mimo);
-title('MIMO residual analysis');
+% Residual analysis for consistency check (custom plot, SISO-style).
+% Using explicit xcorr avoids linked y-axes behavior of resid() and allows
+% zooming the cross-correlations to the confidence bounds.
+e_mimo_id = pe(zv_mimo, sys_mimo);
+e_mimo = e_mimo_id.OutputData;
+u_mimo_val = zv_mimo.InputData;
+N_res_mimo = size(e_mimo, 1);
+max_lag_mimo = min(50, N_res_mimo - 1);
+conf99_mimo = 2.576 / sqrt(N_res_mimo);
 
-% Bode plot of the identified 2x2 transfer matrix
-figure(17); clf;
-bode_mimo = bodeplot(sys_mimo);
-showConfidence(bode_mimo,1);
-grid minor;
-title('Identified MIMO system G_0(q)');
+f_resid_mimo = figure('units', 'centimeters', ...
+    'Position', [5, 5, 1.2*fig_setup.fig_wd, fig_setup.fig_hgt*0.7], ...
+    'Name', 'Part 5: MIMO residual analysis'); clf;
+tiledlayout(ny, nu+1, 'TileSpacing', 'tight', 'Padding', 'compact');
 
-% Pole-zero map
-figure(18); clf;
-pzmap(sys_mimo);
-grid minor;
-title('MIMO pole-zero map');
+for out_idx = 1:ny
+    [Ree_mimo, lags_ee_mimo] = xcorr(e_mimo(:, out_idx), e_mimo(:, out_idx), max_lag_mimo, 'coeff');
 
-fprintf('\n--- MIMO identification summary ---\n');
-fprintf('Model order: n = %d states\n', n_chosen);
-fprintf('Method: n4sid (subspace) + ssest (PEM refinement)\n');
-present(sys_mimo);
+    nexttile((out_idx-1) * (nu+1) + 1);
+    stem(lags_ee_mimo, Ree_mimo, 'filled', 'Color', color(1));
+    hold on;
+    yline(conf99_mimo, '--', 'LineWidth', 1.25, 'Color', color(2));
+    yline(-conf99_mimo, '--', 'LineWidth', 1.25, 'Color', color(2));
+    yline(0, 'k-', 'LineWidth', 1.25);
+    grid on;
+    xlim([-max_lag_mimo, max_lag_mimo]);
+    ylim([-0.1, 1.1]);
+    ylabel(sprintf('$R_{\\epsilon_%d\\epsilon_%d}(\\tau)$', out_idx, out_idx), ...
+        'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    set(gca, 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    set(gca, 'MinorGridLineStyle', 'none');
+    if out_idx < ny
+        xticklabels([]);
+    else
+        xlabel('Lag $\tau$ [-]', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    end
 
+    for in_idx = 1:nu
+        [Reu_mimo, lags_eu_mimo] = xcorr(e_mimo(:, out_idx), u_mimo_val(:, in_idx), max_lag_mimo, 'coeff');
+
+        nexttile((out_idx-1) * (nu+1) + 1 + in_idx);
+        stem(lags_eu_mimo, Reu_mimo, 'filled', 'Color', color(1));
+        hold on;
+        yline(conf99_mimo, '--', 'LineWidth', 1.25, 'Color', color(2));
+        yline(-conf99_mimo, '--', 'LineWidth', 1.25, 'Color', color(2));
+        yline(0, 'k-', 'LineWidth', 1.25);
+        grid on;
+        xlim([-max_lag_mimo, max_lag_mimo]);
+        ylim([-0.1, 0.1]);
+        ylabel(sprintf('$R_{\\epsilon_%d u_%d}(\\tau)$', out_idx, in_idx), ...
+            'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+        set(gca, 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
+        set(gca, 'MinorGridLineStyle', 'none');
+        if out_idx < ny
+            xticklabels([]);
+        else
+            xlabel('Lag $\tau$ [-]', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+        end
+    end
+end
+
+if fig_setup.export_figures
+    filename = "output-figures/mimo_residual" + fig_setup.img_ext;
+    exportgraphics(f_resid_mimo, filename, ...
+        'ContentType', fig_setup.img_format, ...
+        'BackgroundColor', 'none');
+    fprintf('Figure exported: %s\n', filename);
+end
+
+% Bode plots of the identified 2x2 transfer matrix, split per input.
+w_bode_mimo = logspace(-1, log10(pi), 500);
+for in_idx = 1:nu
+    G_in = squeeze(freqresp(sys_mimo(:, in_idx), w_bode_mimo)); % ny x Nw
+    if isvector(G_in)
+        G_in = reshape(G_in, [1, numel(w_bode_mimo)]);
+    end
+
+    mag_db = 20*log10(abs(G_in));
+    phase_deg = unwrap(angle(G_in), [], 2) * 180/pi;
+
+    f_bode_mimo_in = figure('units', 'centimeters', ...
+        'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.7], ...
+        'Name', sprintf('Part 5: Bode plot input u_%d', in_idx)); clf;
+
+    tiledlayout(2,1, 'TileSpacing', 'tight');
+
+    nexttile;
+    hold on;
+    h_out = gobjects(ny, 1);
+    for out_idx = 1:ny
+        h_out(out_idx) = semilogx(w_bode_mimo, mag_db(out_idx, :), ...
+            'LineWidth', 1.25, 'Color', color(out_idx));
+    end
+    grid on;
+    xlim([1e-1, pi]);
+    ylabel('Magnitude [dB]', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    set(gca, 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    set(gca, 'MinorGridLineStyle', 'none');
+    set(gca, 'XScale', 'log');
+    xticklabels([]);
+    legend(h_out, compose('$y_{%d}$', 1:ny), 'Interpreter', 'latex', 'Location', 'best');
+
+    nexttile;
+    hold on;
+    for out_idx = 1:ny
+        semilogx(w_bode_mimo, phase_deg(out_idx, :), ...
+            'LineWidth', 1.25, 'Color', color(out_idx));
+    end
+    grid on;
+    xlim([1e-1, pi]);
+    xlabel('Frequency [rad/s]', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    ylabel('Phase [deg]', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    set(gca, 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    set(gca, 'MinorGridLineStyle', 'none');
+    set(gca, 'XScale', 'log');
+
+    if fig_setup.export_figures
+        filename = "output-figures/bode_mimo_kung_u" + string(in_idx) + fig_setup.img_ext;
+        exportgraphics(f_bode_mimo_in, filename, ...
+            'ContentType', fig_setup.img_format, ...
+            'BackgroundColor', 'none');
+        fprintf('Figure exported: %s\n', filename);
+    end
+end
