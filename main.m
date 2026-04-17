@@ -52,13 +52,16 @@ nexttile;hold on;box on;
 for i = 1:n-1
     u2plot = log(abs( u2((i-1)*p+1:i*p) - u2last ));
     plot((i-1)*p+1:i*p,u2plot);
+    xline(i*p, ':k');
 end
-xline(1*p, ':k');
 yline(log(0.001),'-k','0.1\% error','Interpreter','latex','LineWidth',1.25,'LabelVerticalAlignment','bottom');
 yline(log(eps),'-k','Precision floor','Interpreter','latex','LineWidth',1.25);
 ylabel('$\log \left| u-u_n \right|$','Interpreter','latex');
-xlim([0 N]);
+xlim([0 N-p]);
 ylim([-40 0]);
+set(gca, 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
+grid on
+set(gca, 'MinorGridLineStyle', 'none', 'XGrid', 'off');
 xticklabels([]);
 
 nexttile;hold on;box on;
@@ -917,88 +920,134 @@ N_res_mimo = size(e_mimo, 1);
 max_lag_mimo = min(50, N_res_mimo - 1);
 conf99_mimo = 2.576 / sqrt(N_res_mimo);
 
-f_resid_mimo = figure('units', 'centimeters', ...
-    'Position', [5, 5, 1.2*fig_setup.fig_wd, fig_setup.fig_hgt*0.7], ...
+f_resid_mimo_y1 = figure('units', 'centimeters', ...
+    'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.75], ...
     'Name', 'Part 5: MIMO residual analysis'); clf;
-tiledlayout(ny, nu+1, 'TileSpacing', 'tight', 'Padding', 'compact');
+tiledlayout(nu+1, 1, 'TileSpacing', 'tight', 'Padding', 'compact');
 
-for out_idx = 1:ny
-    [Ree_mimo, lags_ee_mimo] = xcorr(e_mimo(:, out_idx), e_mimo(:, out_idx), max_lag_mimo, 'coeff');
+out_idx = 1;
+[Ree_mimo, lags_ee_mimo] = xcorr(e_mimo(:, out_idx), e_mimo(:, out_idx), max_lag_mimo, 'coeff');
 
-    nexttile((out_idx-1) * (nu+1) + 1);
-    stem(lags_ee_mimo, Ree_mimo, 'filled', 'Color', color(1));
+nexttile(1);
+stem(lags_ee_mimo, Ree_mimo, 'filled', 'Color', color(1));
+hold on;
+yline(conf99_mimo, '--', 'LineWidth', 1.25, 'Color', color(2));
+yline(-conf99_mimo, '--', 'LineWidth', 1.25, 'Color', color(2));
+yline(0, 'k-', 'LineWidth', 1.25);
+grid on;
+xlim([-max_lag_mimo, max_lag_mimo]);
+ylim([-0.1, 1.1]);
+ylabel(sprintf('$R_{\\epsilon_%d\\epsilon_%d}(\\tau)$', out_idx, out_idx), ...
+    'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+set(gca, 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
+set(gca, 'MinorGridLineStyle', 'none');
+xticklabels([]);
+
+for in_idx = 1:nu
+    [Reu_mimo, lags_eu_mimo] = xcorr(e_mimo(:, out_idx), u_mimo_val(:, in_idx), max_lag_mimo, 'coeff');
+
+    nexttile(in_idx+1);
+    stem(lags_eu_mimo, Reu_mimo, 'filled', 'Color', color(1));
     hold on;
     yline(conf99_mimo, '--', 'LineWidth', 1.25, 'Color', color(2));
     yline(-conf99_mimo, '--', 'LineWidth', 1.25, 'Color', color(2));
     yline(0, 'k-', 'LineWidth', 1.25);
     grid on;
     xlim([-max_lag_mimo, max_lag_mimo]);
-    ylim([-0.1, 1.1]);
-    ylabel(sprintf('$R_{\\epsilon_%d\\epsilon_%d}(\\tau)$', out_idx, out_idx), ...
+    ylim([-0.1, 0.1]);
+    ylabel(sprintf('$R_{\\epsilon_%d u_%d}(\\tau)$', out_idx, in_idx), ...
         'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
     set(gca, 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
     set(gca, 'MinorGridLineStyle', 'none');
-    if out_idx < ny
+    if in_idx < nu
         xticklabels([]);
     else
         xlabel('Lag $\tau$ [-]', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
     end
+end
 
-    for in_idx = 1:nu
-        [Reu_mimo, lags_eu_mimo] = xcorr(e_mimo(:, out_idx), u_mimo_val(:, in_idx), max_lag_mimo, 'coeff');
+f_resid_mimo_y2 = figure('units', 'centimeters', ...
+    'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.75], ...
+    'Name', 'Part 5: MIMO residual analysis'); clf;
+tiledlayout(nu+1, 1, 'TileSpacing', 'tight', 'Padding', 'compact');
 
-        nexttile((out_idx-1) * (nu+1) + 1 + in_idx);
-        stem(lags_eu_mimo, Reu_mimo, 'filled', 'Color', color(1));
-        hold on;
-        yline(conf99_mimo, '--', 'LineWidth', 1.25, 'Color', color(2));
-        yline(-conf99_mimo, '--', 'LineWidth', 1.25, 'Color', color(2));
-        yline(0, 'k-', 'LineWidth', 1.25);
-        grid on;
-        xlim([-max_lag_mimo, max_lag_mimo]);
-        ylim([-0.1, 0.1]);
-        ylabel(sprintf('$R_{\\epsilon_%d u_%d}(\\tau)$', out_idx, in_idx), ...
-            'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
-        set(gca, 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
-        set(gca, 'MinorGridLineStyle', 'none');
-        if out_idx < ny
-            xticklabels([]);
-        else
-            xlabel('Lag $\tau$ [-]', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
-        end
+out_idx = 2;
+[Ree_mimo, lags_ee_mimo] = xcorr(e_mimo(:, out_idx), e_mimo(:, out_idx), max_lag_mimo, 'coeff');
+
+nexttile(1);
+stem(lags_ee_mimo, Ree_mimo, 'filled', 'Color', color(1));
+hold on;
+yline(conf99_mimo, '--', 'LineWidth', 1.25, 'Color', color(2));
+yline(-conf99_mimo, '--', 'LineWidth', 1.25, 'Color', color(2));
+yline(0, 'k-', 'LineWidth', 1.25);
+grid on;
+xlim([-max_lag_mimo, max_lag_mimo]);
+ylim([-0.1, 1.1]);
+ylabel(sprintf('$R_{\\epsilon_%d\\epsilon_%d}(\\tau)$', out_idx, out_idx), ...
+    'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+set(gca, 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
+set(gca, 'MinorGridLineStyle', 'none');
+xticklabels([]);
+
+for in_idx = 1:nu
+    [Reu_mimo, lags_eu_mimo] = xcorr(e_mimo(:, out_idx), u_mimo_val(:, in_idx), max_lag_mimo, 'coeff');
+
+    nexttile(in_idx+1);
+    stem(lags_eu_mimo, Reu_mimo, 'filled', 'Color', color(1));
+    hold on;
+    yline(conf99_mimo, '--', 'LineWidth', 1.25, 'Color', color(2));
+    yline(-conf99_mimo, '--', 'LineWidth', 1.25, 'Color', color(2));
+    yline(0, 'k-', 'LineWidth', 1.25);
+    grid on;
+    xlim([-max_lag_mimo, max_lag_mimo]);
+    ylim([-0.1, 0.1]);
+    ylabel(sprintf('$R_{\\epsilon_%d u_%d}(\\tau)$', out_idx, in_idx), ...
+        'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    set(gca, 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    set(gca, 'MinorGridLineStyle', 'none');
+    if in_idx < nu
+        xticklabels([]);
+    else
+        xlabel('Lag $\tau$ [-]', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
     end
 end
 
 if fig_setup.export_figures
-    filename = "output-figures/mimo_residual" + fig_setup.img_ext;
-    exportgraphics(f_resid_mimo, filename, ...
+    filename = "output-figures/mimo_residual_y1" + fig_setup.img_ext;
+    exportgraphics(f_resid_mimo_y1, filename, ...
+        'ContentType', fig_setup.img_format, ...
+        'BackgroundColor', 'none');
+    fprintf('Figure exported: %s\n', filename);
+    filename = "output-figures/mimo_residual_y2" + fig_setup.img_ext;
+    exportgraphics(f_resid_mimo_y2, filename, ...
         'ContentType', fig_setup.img_format, ...
         'BackgroundColor', 'none');
     fprintf('Figure exported: %s\n', filename);
 end
 
-% Bode plots of the identified 2x2 transfer matrix, split per input.
+% Bode plots of the identified 2x2 transfer matrix, split per output.
 w_bode_mimo = logspace(-1, log10(pi), 500);
-for in_idx = 1:nu
-    G_in = squeeze(freqresp(sys_mimo(:, in_idx), w_bode_mimo)); % ny x Nw
-    if isvector(G_in)
-        G_in = reshape(G_in, [1, numel(w_bode_mimo)]);
+for out_idx = 1:ny
+    G_out = squeeze(freqresp(sys_mimo(out_idx, :), w_bode_mimo)); % nu x Nw
+    if isvector(G_out)
+        G_out = reshape(G_out, [1, numel(w_bode_mimo)]);
     end
 
-    mag_db = 20*log10(abs(G_in));
-    phase_deg = unwrap(angle(G_in), [], 2) * 180/pi;
+    mag_db = 20*log10(abs(G_out));
+    phase_deg = unwrap(angle(G_out), [], 2) * 180/pi;
 
-    f_bode_mimo_in = figure('units', 'centimeters', ...
+    f_bode_mimo_out = figure('units', 'centimeters', ...
         'Position', [5, 5, fig_setup.fig_wd, fig_setup.fig_hgt*0.7], ...
-        'Name', sprintf('Part 5: Bode plot input u_%d', in_idx)); clf;
+        'Name', sprintf('Part 5: Bode plot output y_%d', out_idx)); clf;
 
     tiledlayout(2,1, 'TileSpacing', 'tight');
 
     nexttile;
     hold on;
-    h_out = gobjects(ny, 1);
-    for out_idx = 1:ny
-        h_out(out_idx) = semilogx(w_bode_mimo, mag_db(out_idx, :), ...
-            'LineWidth', 1.25, 'Color', color(out_idx));
+    h_in = gobjects(nu, 1);
+    for in_idx = 1:nu
+        h_in(in_idx) = semilogx(w_bode_mimo, mag_db(in_idx, :), ...
+            'LineWidth', 1.25, 'Color', color(in_idx));
     end
     grid on;
     xlim([1e-1, pi]);
@@ -1007,25 +1056,26 @@ for in_idx = 1:nu
     set(gca, 'MinorGridLineStyle', 'none');
     set(gca, 'XScale', 'log');
     xticklabels([]);
-    legend(h_out, compose('$y_{%d}$', 1:ny), 'Interpreter', 'latex', 'Location', 'best');
+    legend(h_in, compose('$u_{%d}$', 1:nu), 'Interpreter', 'latex', 'Location', 'northwest');
 
     nexttile;
     hold on;
-    for out_idx = 1:ny
-        semilogx(w_bode_mimo, phase_deg(out_idx, :), ...
-            'LineWidth', 1.25, 'Color', color(out_idx));
+    for in_idx = 1:nu
+        semilogx(w_bode_mimo, phase_deg(in_idx, :), ...
+            'LineWidth', 1.25, 'Color', color(in_idx));
     end
     grid on;
     xlim([1e-1, pi]);
     xlabel('Frequency [rad/s]', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
     ylabel('Phase [deg]', 'Interpreter', 'latex', 'FontSize', fig_setup.fntsize);
+    yticks(-720:180:720)
     set(gca, 'TickLabelInterpreter', 'latex', 'FontSize', fig_setup.fntsize);
     set(gca, 'MinorGridLineStyle', 'none');
     set(gca, 'XScale', 'log');
 
     if fig_setup.export_figures
-        filename = "output-figures/bode_mimo_kung_u" + string(in_idx) + fig_setup.img_ext;
-        exportgraphics(f_bode_mimo_in, filename, ...
+        filename = "output-figures/bode_mimo_kung_y" + string(out_idx) + fig_setup.img_ext;
+        exportgraphics(f_bode_mimo_out, filename, ...
             'ContentType', fig_setup.img_format, ...
             'BackgroundColor', 'none');
         fprintf('Figure exported: %s\n', filename);
